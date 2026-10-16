@@ -10,6 +10,19 @@
 (async () => {
   const player = window.RufflePlayer.newest().createPlayer();
   document.querySelector('#client').append(player);
+  const heldKeys = new Map();
+  player.addEventListener('keydown', event => heldKeys.set(event.code, event));
+  player.addEventListener('keyup', event => heldKeys.delete(event.code));
+  const releaseKeys = () => {
+    const keys = [...heldKeys.values()];
+    heldKeys.clear();
+    for (const event of keys) window.dispatchEvent(new KeyboardEvent('keyup', event));
+  };
+  // Ruffle ignores key-up after losing focus, so release before its focusout handler runs.
+  player.addEventListener('focusout', event => {
+    if (!player.contains(event.relatedTarget)) releaseKeys();
+  }, true);
+  window.addEventListener('blur', releaseKeys);
   const accountEndpoint = new URL('/legacy-api/', location.href).href;
   const audioEndpoint = new URL('/sfx/', location.href).href;
   const socketEndpoint = new URL('/game', location.href);

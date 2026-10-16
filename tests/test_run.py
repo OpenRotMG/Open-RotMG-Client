@@ -45,6 +45,11 @@ class ClientRoutingTests(unittest.TestCase):
         self.assertNotIn("historical fidelity", html)
         self.assertNotIn("External requests are blocked", html)
 
+    def test_focus_loss_releases_held_game_keys(self):
+        result = subprocess.run(["node", "--test", str(run.ROOT / "tests/input.mjs")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_only_legacy_game_account_api_urls_are_rewritten(self):
         html = (run.ROOT / "index.html").read_text()
         pattern = re.search(r"\[/([^\n]+?)/,accountEndpoint\]", html).group(1).replace(r"\/", "/")
