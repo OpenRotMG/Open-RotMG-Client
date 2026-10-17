@@ -1,91 +1,24 @@
 [
-  {
-    "type": "MouseMove",
-    "pos": [
-      10,
-      10
-    ]
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 150
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 50
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 75
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -75
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -75
-  },
-  {
-    "type": "FocusLost"
-  },
-  {
-    "type": "FocusGained"
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -25
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": -75
-  },
-  {
-    "type": "MouseWheel",
-    "lines": 3
-  },
-  {
-    "type": "MouseWheel",
-    "lines": -1
-  },
-  {
-    "type": "MouseWheel",
-    "pixels": 0
-  }
+  {"type": "MouseMove", "pos": [10, 10]},
+  {"type": "MouseWheel", "pixels": 25},
+  {"type": "MouseWheel", "pixels": 25},
+  {"type": "MouseWheel", "pixels": 25},
+  {"type": "MouseWheel", "pixels": 25},
+  {"type": "MouseWheel", "pixels": -25},
+  {"type": "MouseWheel", "pixels": -25},
+  {"type": "MouseWheel", "pixels": -25},
+  {"type": "MouseWheel", "pixels": -25},
+  {"type": "MouseWheel", "pixels": 150},
+  {"type": "MouseWheel", "pixels": 50},
+  {"type": "MouseWheel", "pixels": 75},
+  {"type": "MouseWheel", "pixels": -25},
+  {"type": "MouseWheel", "pixels": -75},
+  {"type": "MouseWheel", "pixels": -75},
+  {"type": "FocusLost"},
+  {"type": "FocusGained"},
+  {"type": "MouseWheel", "pixels": -25},
+  {"type": "MouseWheel", "pixels": -75},
+  {"type": "MouseWheel", "lines": 3},
+  {"type": "MouseWheel", "lines": -1},
+  {"type": "MouseWheel", "pixels": 0}
 ]
