@@ -1,20 +1,16 @@
 name: Patched Ruffle
-on:
-  push:
-    tags: ['ruffle-*']
-  workflow_dispatch:
+on: push
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - run: python3 -m unittest discover -s tests -v
   build:
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: ubuntu-24.04
     permissions:
@@ -25,12 +21,13 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
+          package-manager-cache: false
       - name: Read toolchain and release pins
         id: pins
         run: |
@@ -56,12 +53,12 @@ jobs:
           echo "$PWD/wasm-bindgen-$VERSION-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
       - name: Build both variants and run Flash-reference tests
         run: python3 scripts/build_ruffle.py --work-dir "$RUNNER_TEMP/ruffle-build" --output "$PWD/ruffle-${{ steps.pins.outputs.version }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: patched-ruffle
           path: ruffle-${{ steps.pins.outputs.version }}.zip
       - name: Stage immutable release for qualification
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/ruffle-')
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.pins.outputs.version }}
