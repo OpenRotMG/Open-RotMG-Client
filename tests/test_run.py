@@ -38,7 +38,7 @@ class LauncherTests(unittest.TestCase):
 
 class ClientRoutingTests(unittest.TestCase):
     def test_loading_status_clears_without_gameplay_disclaimers(self):
-        html = (run.ROOT / "index.html").read_text()
+        html = (run.ROOT / "launcher.js").read_text()
         self.assertIn("document.querySelector('#status').textContent = '';", html)
         self.assertIn("document.querySelector('#status').textContent = String(error);", html)
         self.assertNotIn("historically verified game", html)
@@ -46,12 +46,12 @@ class ClientRoutingTests(unittest.TestCase):
         self.assertNotIn("External requests are blocked", html)
 
     def test_focus_loss_releases_held_game_keys(self):
-        result = subprocess.run(["node", "--test", str(run.ROOT / "tests/input.mjs")],
+        result = subprocess.run(["node", "--test", str(run.ROOT / "tests/input.mjs"), str(run.ROOT / "tests/launcher.mjs")],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_only_legacy_game_account_picture_api_urls_are_rewritten(self):
-        html = (run.ROOT / "index.html").read_text()
+        html = (run.ROOT / "launcher.js").read_text()
         pattern = re.search(r"\[/([^\n]+?)/,accountEndpoint\]", html).group(1).replace(r"\/", "/")
         for port in [8080, 18923, 65535]:
             origin = f"http://127.0.0.1:{port}"

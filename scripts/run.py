@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from urllib.request import urlopen
 from zipfile import ZipFile
+from prepare_editor import prepare_editor
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = json.loads((ROOT / 'ruffle/lock.json').read_text())
@@ -66,6 +67,7 @@ if __name__ == '__main__':
             parser.error(f'Missing sibling Rust server: {server / "Cargo.toml"}. Clone https://github.com/OpenRotMG/Open-RotMG-Server into a sibling server directory.')
         if shutil.which('cargo') is None:
             parser.error('Cargo not found. Install Rust/Cargo from https://rustup.rs/ and rerun.')
+    prepare_editor()
     prepare_ruffle()
     if not args.prepare_only:
         command = ['cargo', 'run', '--locked'] + (['--', '--dev-control'] if args.dev_control else [])

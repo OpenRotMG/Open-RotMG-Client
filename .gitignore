@@ -4,3 +4,5 @@
 /vendor/
 /.ruffle-*.zip
 __pycache__/
+/native-texture-editor.swf
+/.editor-stage-*

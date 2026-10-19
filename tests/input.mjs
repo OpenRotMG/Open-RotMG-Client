@@ -3,8 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const script = await readFile(new URL('../launcher.js', import.meta.url), 'utf8');
 
 async function setup() {
   class Target {
@@ -29,7 +28,7 @@ async function setup() {
     window.addEventListener('keyup', event => { if (focused) delivered.push(event); });
   }});
   window.RufflePlayer = {newest: () => ({createPlayer: () => player})};
-  const document = {querySelector: selector => ({'#client': {append() {}}, '#status': {}})[selector]};
+  const document = {querySelector: selector => ({'#client': {dataset: {mode: 'game'}, append() {}}, '#status': {}})[selector]};
   await vm.runInNewContext(script, {window, document, KeyboardEvent, URL, location: {href:'http://localhost:8080/'}, console});
   const down = (code, key, extra = {}) => player.dispatchEvent({type:'keydown', code, key, ...extra});
   const up = (code, key) => {

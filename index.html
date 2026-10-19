@@ -4,42 +4,7 @@
 <title>OpenRotMG 123.5.1 development</title>
 <style>body { background:#20242a;color:white;font:16px sans-serif } ruffle-player { width:800px;height:600px;display:block } pre {white-space:pre-wrap}</style>
 <h1>OpenRotMG 123.5.1 development</h1>
-<div id="client"></div><pre id="status">Loading…</pre>
+<p><a href="draw.html">Pixel editor</a></p>
+<div id="client" data-mode="game"></div><pre id="status">Loading…</pre>
 <script src="vendor/ruffle.js"></script>
-<script>
-(async () => {
-  const player = window.RufflePlayer.newest().createPlayer();
-  document.querySelector('#client').append(player);
-  const heldKeys = new Map();
-  player.addEventListener('keydown', event => heldKeys.set(event.code, event));
-  player.addEventListener('keyup', event => heldKeys.delete(event.code));
-  const releaseKeys = () => {
-    const keys = [...heldKeys.values()];
-    heldKeys.clear();
-    for (const event of keys) window.dispatchEvent(new KeyboardEvent('keyup', event));
-  };
-  // Ruffle ignores key-up after losing focus, so release before its focusout handler runs.
-  player.addEventListener('focusout', event => {
-    if (!player.contains(event.relatedTarget)) releaseKeys();
-  }, true);
-  window.addEventListener('blur', releaseKeys);
-  const accountEndpoint = new URL('/legacy-api/', location.href).href;
-  const audioEndpoint = new URL('/sfx/', location.href).href;
-  const socketEndpoint = new URL('/game', location.href);
-  socketEndpoint.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  await player.ruffle().load({
-    url:'/client.swf',
-    autoplay:'on',unmuteOverlay:'hidden',preferredRenderer:'wgpu-webgl',
-    logLevel:'info',openUrlMode:'deny',allowScriptAccess:false,
-    socketProxy:[{host:'127.0.0.1',port:2050,proxyUrl:socketEndpoint.href}],
-    urlRewriteRules:[
-      [/^https?:\/\/127\.0\.0\.1:8080\/(?=(?:char|account|fame|guild|picture)\/)/,accountEndpoint],
-      [/^https?:\/\/realmofthemadgod\.appspot\.com\/sfx\//,audioEndpoint]
-    ]
-  });
-  document.querySelector('#status').textContent = '';
-})().catch(error => {
-  document.querySelector('#status').textContent = String(error);
-  console.error(error);
-});
-</script>
+<script src="launcher.js"></script>

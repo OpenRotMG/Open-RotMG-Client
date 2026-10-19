@@ -1,0 +1,48 @@
+{
+  "sourceSha256": "07ae4fc3ca021a5bf08bbf94f057f7620be18b85e01abd763b3a198382e8fa48",
+  "outputSha256": "b102f0a779e4013f945b4576a716d7b7fc2dd60f84bfd8a89361e0ffc9f7023b",
+  "sourceBytes": 3978301,
+  "outputBytes": 3978303,
+  "edits": [
+    {
+      "offset": 4,
+      "before": "3db43c00",
+      "after": "3fb43c00",
+      "reason": "SWF file length"
+    },
+    {
+      "offset": 2710368,
+      "before": "4d481300",
+      "after": "4f481300",
+      "reason": "DoABC tag length"
+    },
+    {
+      "offset": 3114138,
+      "before": "5dfe054afe05",
+      "after": "5dc4214ac421",
+      "reason": "uf.ER: title construction -> existing native texture scene"
+    },
+    {
+      "offset": 3150559,
+      "before": "ab04",
+      "after": "ad04",
+      "reason": "kW constructor code length 555 -> 557"
+    },
+    {
+      "offset": 3150578,
+      "before": "11100200",
+      "after": "11120200",
+      "reason": "kW constructor forward branch across expanded super argument"
+    },
+    {
+      "offset": 3150583,
+      "before": "20",
+      "after": "60c421",
+      "reason": "kW constructor super(null) -> super(kW): normal native account refresh scene"
+    }
+  ],
+  "source": "client.swf",
+  "sourceRevision": "5db91b03d2e1ca87e7d7fa0f184dce13487f44ee",
+  "artifact": "native-texture-editor.swf",
+  "identity": "Reconstructed public entry over the preserved 123.5.1 client; not a recovered original TextureMaker artifact."
+}
