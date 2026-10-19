@@ -55,7 +55,7 @@ class ClientRoutingTests(unittest.TestCase):
         pattern = re.search(r"\[/([^\n]+?)/,accountEndpoint\]", html).group(1).replace(r"\/", "/")
         for port in [8080, 18923, 65535]:
             origin = f"http://127.0.0.1:{port}"
-            for path in ["client.swf", "vendor/ruffle.js", "sfx/death_screen.mp3", "legacy-api/char/list", "game", "health"]:
+            for path in ["client.swf", "native-texture-editor.swf", "draw.html", "launcher.js", "vendor/ruffle.js", "sfx/death_screen.mp3", "legacy-api/char/list", "game", "health"]:
                 with self.subTest(port=port, path=path):
                     url = f"{origin}/{path}"
                     self.assertEqual(re.sub(pattern, origin + "/legacy-api/", url), url)
