@@ -1,0 +1,1549 @@
+diff --git a/web/packages/core/src/internal/player/advancement.ts b/web/packages/core/src/internal/player/advancement.ts
+new file mode 100644
+index 0000000..77d36bc
+--- /dev/null
++++ b/web/packages/core/src/internal/player/advancement.ts
+@@ -0,0 +1,258 @@
++export interface AdvancementHost {
++    now(): number;
++    requestFrame(callback: () => void): number;
++    cancelFrame(id: number): void;
++    playing(value: boolean): void;
++    advance(elapsed: number): number;
++    present(): void;
++    destroy(): void;
++}
++
++/**
++ * Keeps wakeup delivery independent of RAF, without moving the VM off the window.
++ *
++ * @returns The single wakeup producer, never a VM or clock owner.
++ */
++export function createAdvancementWorker(): Worker {
++    const url = URL.createObjectURL(
++        new Blob(
++            [
++                `
++        let timer;
++        self.onmessage = ({data}) => {
++            clearTimeout(timer);
++            if (data.delay !== undefined) {
++                timer = setTimeout(() => self.postMessage(data.generation), data.delay);
++            }
++        };
++    `,
++            ],
++            { type: "application/javascript" },
++        ),
++    );
++    try {
++        return new Worker(url);
++    } finally {
++        URL.revokeObjectURL(url);
++    }
++}
++
++export class Advancement {
++    private intent = false;
++    private playRequested = false;
++    private active = false;
++    private hidden = false;
++    private background = false;
++    private closed = false;
++    private cleaned = false;
++    private busy = false;
++    private coreDepth = 0;
++    private generation = 0;
++    private cancelledThrough = 0;
++    private pending = false;
++    private frame: number | null = null;
++    private last: number | null = null;
++    private delay = 0;
++
++    constructor(
++        private host: AdvancementHost,
++        private worker: Worker,
++    ) {
++        worker.onmessage = ({ data }: MessageEvent<unknown>) => {
++            if (
++                this.closed ||
++                (typeof data === "number" &&
++                    Number.isSafeInteger(data) &&
++                    data > 0 &&
++                    data <= this.cancelledThrough)
++            ) {
++                return;
++            }
++            this.run(() => {
++                if (data !== this.generation || !this.pending || !this.active) {
++                    throw new Error(
++                        "Unexpected advancement wakeup owner/generation",
++                    );
++                }
++                this.pending = false;
++                const now = host.now();
++                if (
++                    !Number.isFinite(now) ||
++                    (this.last !== null && now < this.last)
++                ) {
++                    throw new Error(
++                        "Invalid window monotonic advancement clock",
++                    );
++                }
++                const elapsed = this.last === null ? 0 : now - this.last;
++                this.last = now;
++                this.delay = host.advance(elapsed);
++                if (!Number.isFinite(this.delay) || this.delay < 0) {
++                    throw new Error("Invalid core advancement deadline");
++                }
++            });
++        };
++        worker.onerror = (event) => {
++            this.destroy();
++            throw new Error(`Advancement worker failed: ${event.message}`);
++        };
++        worker.onmessageerror = () => {
++            this.destroy();
++            throw new Error("Advancement worker message could not be decoded");
++        };
++        this.run(() => host.playing(false));
++        this.requestFrame();
++    }
++
++    play(value: boolean): void {
++        if (this.closed) {
++            return;
++        }
++        try {
++            if (this.intent !== value) {
++                this.invalidate();
++            }
++            this.intent = value;
++            this.playRequested = value;
++            this.reconcile();
++        } catch (error) {
++            this.destroy();
++            throw error;
++        }
++    }
++
++    policy(hidden: boolean, background: boolean): void {
++        if (this.closed) {
++            return;
++        }
++        if (this.hidden !== hidden || this.background !== background) {
++            console.debug("Ruffle advancement policy", { hidden, background });
++        }
++        this.hidden = hidden;
++        this.background = background;
++        this.reconcile();
++    }
++
++    enterCoreCall(): void {
++        this.coreDepth++;
++    }
++
++    leaveCoreCall(): void {
++        if (this.coreDepth === 0) {
++            throw new Error("Unbalanced core call boundary");
++        }
++        this.coreDepth--;
++        this.reconcile();
++    }
++
++    destroy(): void {
++        if (this.closed) {
++            return;
++        }
++        this.closed = true;
++        this.generation++;
++        this.pending = false;
++        try {
++            this.worker.terminate();
++            if (this.frame !== null) {
++                this.host.cancelFrame(this.frame);
++            }
++        } finally {
++            this.frame = null;
++            this.reconcile();
++        }
++    }
++
++    private invalidate(): void {
++        this.cancelledThrough = ++this.generation;
++        this.pending = false;
++        this.last = null;
++        this.delay = 0;
++        this.worker.postMessage({ generation: this.generation });
++    }
++
++    private reconcile(): void {
++        // ExternalInterface can change intent while core holds its player lock.
++        if (this.busy || this.coreDepth > 0) {
++            return;
++        }
++        try {
++            if (this.closed) {
++                if (!this.cleaned) {
++                    this.cleaned = true;
++                    this.host.destroy();
++                }
++                return;
++            }
++            const active = this.intent && (!this.hidden || this.background);
++            const changed = active !== this.active;
++            if (changed || (active && this.playRequested)) {
++                this.playRequested = false;
++                if (changed) {
++                    this.invalidate();
++                    this.active = active;
++                    console.debug("Ruffle advancement lifecycle", {
++                        active,
++                        hidden: this.hidden,
++                        background: this.background,
++                    });
++                }
++                this.host.playing(active);
++            }
++            if (!this.closed && this.active && !this.pending) {
++                this.pending = true;
++                this.generation++;
++                this.worker.postMessage({
++                    generation: this.generation,
++                    delay: this.delay,
++                });
++            }
++        } catch (error) {
++            this.destroy();
++            throw error;
++        }
++    }
++
++    private run(callback: () => void): void {
++        if (this.busy || this.coreDepth > 0) {
++            throw new Error("Reentrant advancement/presentation owner");
++        }
++        this.busy = true;
++        try {
++            callback();
++        } catch (error) {
++            this.destroy();
++            throw error;
++        } finally {
++            this.busy = false;
++            this.reconcile();
++        }
++    }
++
++    private requestFrame(): void {
++        if (this.closed) {
++            return;
++        }
++        try {
++            if (this.frame !== null) {
++                throw new Error("Duplicate presentation owner");
++            }
++            const id = this.host.requestFrame(() => {
++                if (this.closed) {
++                    return;
++                }
++                if (this.frame !== id) {
++                    this.destroy();
++                    throw new Error("Unexpected presentation callback owner");
++                }
++                this.frame = null;
++                this.run(() => this.host.present());
++                this.requestFrame();
++            });
++            this.frame = id;
++        } catch (error) {
++            this.destroy();
++            throw error;
++        }
++    }
++}
+diff --git a/web/packages/core/src/internal/player/inner.tsx b/web/packages/core/src/internal/player/inner.tsx
+index 1fb7b06..59cdf6f 100644
+--- a/web/packages/core/src/internal/player/inner.tsx
++++ b/web/packages/core/src/internal/player/inner.tsx
+@@ -1,3 +1,4 @@
++import { Advancement, createAdvancementWorker } from "./advancement.js";
+ import type { RuffleHandle, ZipWriter } from "../../../dist/ruffle_web.js";
+ import {
+     AutoPlay,
+@@ -186,12 +187,7 @@ export class InnerPlayer {
+     private swfUrl?: URL;
+     private instance: RuffleHandle | null;
+     private newZipWriter: (() => ZipWriter) | null;
+-    private lastActivePlayingState: boolean;
+-
+-    // Non-null while ticking in the background (BackgroundExecutionMode.MainThread).
+-    // Uses a ping-pong ack to avoid message queue build-up if the main thread falls behind.
+-    // Set when the tab is hidden, cleared when it becomes visible again or the player is destroyed.
+-    private backgroundWorker: Worker | null;
++    private advancement: Advancement | null;
+ 
+     metadata: MovieMetadata | null;
+     _readyState: ReadyState;
+@@ -335,8 +331,7 @@ export class InnerPlayer {
+         this._readyState = ReadyState.HaveNothing;
+         this.metadata = null;
+ 
+-        this.lastActivePlayingState = false;
+-        this.backgroundWorker = null;
++        this.advancement = null;
+         this.setupTabVisibilityHandling();
+     }
+ 
+@@ -467,79 +462,39 @@ export class InnerPlayer {
+      */
+     private setupTabVisibilityHandling(): void {
+         document.addEventListener("visibilitychange", () => {
+-            if (!this.instance) {
+-                return;
+-            }
+-            const mode =
+-                this.loadedConfig?.backgroundExecutionMode ??
+-                BackgroundExecutionMode.None;
+-            if (document.hidden) {
+-                this.lastActivePlayingState = this.instance.is_playing();
+-                if (mode === BackgroundExecutionMode.MainThread) {
+-                    this.instance.enable_background_tick_mode();
+-                    if (this.lastActivePlayingState) {
+-                        this.startBackgroundTick();
+-                    }
+-                } else {
+-                    this.instance.pause();
+-                }
+-            } else {
+-                if (mode === BackgroundExecutionMode.MainThread) {
+-                    this.stopBackgroundTick();
+-                    this.instance.restart_animation_loop();
+-                }
+-                if (this.lastActivePlayingState) {
+-                    this.instance.play();
+-                }
++            this.updateAdvancementPolicy();
++            if (!document.hidden && this.isPlaying) {
+                 // Browsers may auto-suspend AudioContext in background tabs.
+-                this.instance.audio_context()?.resume();
++                void this.instance
++                    ?.audio_context()
++                    ?.resume()
++                    .catch((error: unknown) => {
++                        console.error(
++                            "Unable to resume Ruffle audio context",
++                            error,
++                        );
++                    });
+             }
+         });
+     }
+ 
+-    /**
+-     * Starts a background tick loop while the tab is hidden.
+-     */
+-    private startBackgroundTick(): void {
+-        const intervalMs = 1000 / (this.metadata?.frameRate || 24);
+-
+-        // intervalMs is always a number (dividing 1000 by anything yields a number
+-        // or NaN), so no code injection via the template literal is possible.
+-        const workerCode = `
+-            const intervalMs = ${intervalMs};
+-            self.onmessage = () => {
+-                setTimeout(() => self.postMessage("tick"), intervalMs);
+-            };
+-            setTimeout(() => self.postMessage("tick"), intervalMs);
+-        `;
++    enterCoreCall(): Advancement | null {
++        const owner = this.advancement;
++        owner?.enterCoreCall();
++        return owner;
++    }
+ 
+-        try {
+-            const blob = new Blob([workerCode], {
+-                type: "application/javascript",
+-            });
+-            const workerUrl = URL.createObjectURL(blob);
+-            const worker = new Worker(workerUrl);
+-            URL.revokeObjectURL(workerUrl);
+-
+-            this.backgroundWorker = worker;
+-            worker.onmessage = () => {
+-                if (this.backgroundWorker === worker) {
+-                    this.instance?.tick_for_background(performance.now());
+-                    worker.postMessage("ack");
+-                }
+-            };
+-        } catch (e) {
+-            console.warn("Unable to create background Worker:", e);
+-            this.instance?.pause();
+-        }
++    leaveCoreCall(owner: Advancement | null): void {
++        owner?.leaveCoreCall();
+     }
+ 
+-    /**
+-     * Stops the background tick loop and releases any held resources.
+-     */
+-    private stopBackgroundTick(): void {
+-        this.backgroundWorker?.terminate();
+-        this.backgroundWorker = null;
++    private updateAdvancementPolicy(): void {
++        this.advancement?.policy(
++            document.hidden,
++            (this.loadedConfig?.backgroundExecutionMode ??
++                DEFAULT_CONFIG.backgroundExecutionMode) ===
++                BackgroundExecutionMode.MainThread,
++        );
+     }
+ 
+     /**
+@@ -740,6 +695,40 @@ export class InnerPlayer {
+             throw e;
+         });
+ 
++        const instance = this.instance;
++        if (!instance) {
++            throw new Error("Ruffle builder returned no instance");
++        }
++        try {
++            this.advancement = new Advancement(
++                {
++                    now: () => window.performance.now(),
++                    requestFrame: (callback) =>
++                        window.requestAnimationFrame(callback),
++                    cancelFrame: (id) => window.cancelAnimationFrame(id),
++                    playing: (value) =>
++                        value ? instance.play() : instance.pause(),
++                    advance: (elapsed) => instance.advance(elapsed),
++                    present: () => instance.present(),
++                    destroy: () => {
++                        instance.destroy();
++                        if (this.instance === instance) {
++                            this.instance = null;
++                            this.advancement = null;
++                        }
++                    },
++                },
++                createAdvancementWorker(),
++            );
++            this.updateAdvancementPolicy();
++        } catch (error) {
++            if (this.instance === instance) {
++                instance.destroy();
++            }
++            this.instance = null;
++            throw error;
++        }
++
+         this.rendererDebugInfo = this.instance!.renderer_debug_info();
+ 
+         if (this.rendererDebugInfo.includes("Adapter Device Type: Cpu")) {
+@@ -850,8 +839,12 @@ export class InnerPlayer {
+      */
+     destroy(): void {
+         if (this.instance) {
+-            this.stopBackgroundTick();
+-            this.instance.destroy();
++            if (this.advancement) {
++                this.advancement.destroy();
++                this.advancement = null;
++            } else {
++                this.instance.destroy();
++            }
+             this.instance = null;
+             this.metadata = null;
+             this._readyState = ReadyState.HaveNothing;
+@@ -1021,7 +1014,11 @@ export class InnerPlayer {
+      */
+     play(): void {
+         if (this.instance) {
+-            this.instance.play();
++            this.updateAdvancementPolicy();
++            if (!this.advancement) {
++                throw new Error("Missing advancement owner");
++            }
++            this.advancement.play(true);
+             this.playButton.style.display = "none";
+         }
+     }
+@@ -1846,7 +1843,10 @@ export class InnerPlayer {
+      */
+     pause(): void {
+         if (this.instance) {
+-            this.instance.pause();
++            if (!this.advancement) {
++                throw new Error("Missing advancement owner");
++            }
++            this.advancement.play(false);
+             this.playButton.style.display = "block";
+         }
+     }
+diff --git a/web/packages/core/test/advancement.ts b/web/packages/core/test/advancement.ts
+new file mode 100644
+index 0000000..c482151
+--- /dev/null
++++ b/web/packages/core/test/advancement.ts
+@@ -0,0 +1,507 @@
++import { strict as assert } from "node:assert";
++import { runInNewContext } from "node:vm";
++import {
++    Advancement,
++    type AdvancementHost,
++    createAdvancementWorker,
++} from "../src/internal/player/advancement.js";
++
++class Wakeup {
++    onmessage: ((event: { data: unknown }) => void) | null = null;
++    onerror: ((event: { message: string }) => void) | null = null;
++    onmessageerror: (() => void) | null = null;
++    messages: { generation: number; delay?: number }[] = [];
++    terminated = false;
++    fail = false;
++    postMessage(message: { generation: number; delay?: number }) {
++        if (this.fail) {
++            throw new Error("post failed");
++        }
++        this.messages.push(message);
++    }
++    terminate() {
++        this.terminated = true;
++    }
++    fire(generation = this.messages.at(-1)!.generation) {
++        this.onmessage!({ data: generation });
++    }
++}
++
++function setup() {
++    const worker = new Wakeup();
++    let now = 100;
++    let next = 1;
++    const frames = new Map<number, () => void>();
++    const elapsed: number[] = [];
++    const events: string[] = [];
++    const host: AdvancementHost = {
++        now: () => now,
++        requestFrame: (callback) => {
++            const id = next++;
++            frames.set(id, callback);
++            return id;
++        },
++        cancelFrame: (id) => {
++            frames.delete(id);
++        },
++        playing: (value) => {
++            events.push(`playing:${value}`);
++        },
++        advance: (dt) => {
++            elapsed.push(dt);
++            events.push("advance");
++            return 10;
++        },
++        present: () => {
++            events.push("present");
++        },
++        destroy: () => {
++            events.push("destroy");
++        },
++    };
++    const owner = new Advancement(host, worker as unknown as Worker);
++    return {
++        owner,
++        worker,
++        host,
++        frames,
++        elapsed,
++        events,
++        time: (value: number) => {
++            now = value;
++        },
++        frame: () => {
++            const [id, callback] = frames.entries().next().value!;
++            frames.delete(id);
++            callback();
++        },
++    };
++}
++
++describe("Advancement production owner (controlled clock, non-native)", () => {
++    it("charges real window elapsed once, including delayed delivery, without RAF or bursts", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.worker.fire();
++        s.time(125);
++        s.worker.fire();
++        s.time(6950);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 25, 6825]);
++        assert.equal(
++            s.worker.messages.filter((m) => m.delay !== undefined).length,
++            4,
++        );
++        assert.equal(s.frames.size, 1);
++        assert(!s.events.includes("present"));
++        s.frame();
++        s.frame();
++        assert.deepEqual(s.elapsed, [0, 25, 6825]);
++        assert.equal(s.frames.size, 1);
++    });
++
++    it("pause cancels stale tasks and resume resets baseline, not getTimer", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.worker.fire();
++        const stale = s.worker.messages.at(-1)!.generation;
++        s.owner.play(false);
++        s.time(1200000);
++        s.worker.fire(stale);
++        assert.deepEqual(s.elapsed, [0]);
++        s.owner.play(true);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 0]);
++    });
++
++    it("hidden None preserves manual intent and explicit pause always wins", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.worker.fire();
++        s.owner.policy(true, false);
++        s.owner.play(false);
++        s.owner.policy(false, false);
++        assert.equal(s.events.at(-1), "playing:false");
++        s.owner.policy(true, false);
++        s.owner.play(true);
++        assert.equal(s.events.at(-1), "playing:false");
++        s.owner.policy(false, false);
++        s.time(20000);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 0]);
++    });
++
++    it("explicit hidden pause survives showing in both background modes", () => {
++        for (const background of [false, true]) {
++            const s = setup();
++            s.owner.policy(false, background);
++            s.owner.play(true);
++            s.worker.fire();
++            s.owner.policy(true, background);
++            s.owner.play(false);
++            s.owner.policy(false, background);
++            s.time(20000);
++            s.worker.fire();
++            assert.deepEqual(s.elapsed, [0]);
++            assert.equal(s.events.at(-1), "playing:false");
++        }
++    });
++
++    it("direct focus/input boundaries alone do not change visibility policy or advancement time", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.worker.fire();
++        const count = s.worker.messages.length;
++        s.owner.enterCoreCall();
++        s.owner.leaveCoreCall();
++        assert.equal(s.worker.messages.length, count);
++        s.time(125);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 25]);
++    });
++
++    it("MainThread and visibility changes retain a single clock and mode changes suspend", () => {
++        const s = setup();
++        s.owner.policy(false, true);
++        s.owner.play(true);
++        s.worker.fire();
++        s.owner.policy(true, true);
++        s.time(150);
++        s.worker.fire();
++        s.owner.policy(false, true);
++        s.time(175);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 50, 25]);
++        s.owner.policy(true, false);
++        s.owner.policy(true, true);
++        s.time(200);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 50, 25, 0]);
++    });
++
++    it("repeated public play reasserts core state/audio without creating another owner", () => {
++        const s = setup();
++        let corePlaying = false;
++        s.host.playing = (value) => {
++            corePlaying = value;
++        };
++        s.owner.play(true);
++        assert(corePlaying);
++        s.worker.fire();
++        // A real core can suspend itself after stepping without changing frontend intent.
++        corePlaying = false;
++        const pending = s.worker.messages.length;
++        s.owner.play(true);
++        assert(corePlaying);
++        assert.equal(s.worker.messages.length, pending);
++        s.time(125);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 25]);
++    });
++
++    it("repeated play/policy keeps one owner; RAF invokes presentation only", () => {
++        const s = setup();
++        s.owner.play(true);
++        const count = s.worker.messages.length;
++        s.owner.play(true);
++        s.owner.policy(false, false);
++        s.owner.policy(false, false);
++        assert.equal(s.worker.messages.length, count);
++        s.frame();
++        s.frame();
++        assert.equal(s.elapsed.length, 0);
++        s.worker.fire();
++        assert.equal(s.elapsed.length, 1);
++        assert.equal(s.events.filter((e) => e === "present").length, 2);
++    });
++
++    for (const operation of ["advance", "present"] as const) {
++        it(`defers synchronous ${operation} pause until the VM borrow returns`, () => {
++            const s = setup();
++            s.owner.play(true);
++            s.host[operation] = () => {
++                s.events.push("enter");
++                s.owner.play(false);
++                assert.notEqual(s.events.at(-1), "playing:false");
++                s.events.push("exit");
++                return 10;
++            };
++            if (operation === "advance") {
++                s.worker.fire();
++            } else {
++                s.frame();
++            }
++            assert.deepEqual(s.events.slice(-3), [
++                "enter",
++                "exit",
++                "playing:false",
++            ]);
++        });
++        it(`defers synchronous ${operation} destruction and rejects old reload callbacks`, () => {
++            const s = setup();
++            s.owner.play(true);
++            const staleFrame = s.frames.values().next().value!;
++            s.host[operation] = () => {
++                s.events.push("enter");
++                s.owner.destroy();
++                assert(!s.events.includes("destroy"));
++                s.events.push("exit");
++                return 10;
++            };
++            if (operation === "advance") {
++                s.worker.fire();
++            } else {
++                s.frame();
++            }
++            assert.deepEqual(s.events.slice(-3), ["enter", "exit", "destroy"]);
++            s.worker.fire();
++            staleFrame();
++            s.owner.destroy();
++            assert.equal(s.events.filter((e) => e === "destroy").length, 1);
++            assert.equal(s.frames.size, 0);
++            assert(s.worker.terminated);
++            const replacement = setup();
++            replacement.owner.play(true);
++            replacement.worker.fire();
++            assert.deepEqual(replacement.elapsed, [0]);
++        });
++    }
++
++    it("pause then play during a tick resets the next elapsed baseline", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.host.advance = (dt) => {
++            s.elapsed.push(dt);
++            s.owner.play(false);
++            s.owner.play(true);
++            return 10;
++        };
++        s.worker.fire();
++        s.time(200);
++        s.worker.fire();
++        assert.deepEqual(s.elapsed, [0, 0]);
++    });
++
++    it("surfaces failed postMessage instead of switching to RAF advancement", () => {
++        const s = setup();
++        s.worker.fail = true;
++        assert.throws(() => s.owner.play(true), /post failed/);
++        assert.equal(s.elapsed.length, 0);
++    });
++
++    it("surfaces worker/decode/clock/deadline/owner/VM/frame-schedule errors and stops", () => {
++        for (const kind of [
++            "worker",
++            "decode",
++            "clock",
++            "deadline",
++            "owner",
++            "vm",
++            "frame",
++        ]) {
++            const s = setup();
++            s.owner.play(true);
++            if (kind === "clock") {
++                s.time(NaN);
++            }
++            if (kind === "deadline") {
++                s.host.advance = () => -1;
++            }
++            if (kind === "vm") {
++                s.host.advance = () => {
++                    throw new Error("core borrow failed");
++                };
++            }
++            if (kind === "frame") {
++                s.host.requestFrame = () => {
++                    throw new Error("RAF failed");
++                };
++            }
++            assert.throws(() => {
++                if (kind === "worker") {
++                    s.worker.onerror!({ message: "worker failed" });
++                } else if (kind === "decode") {
++                    s.worker.onmessageerror!();
++                } else if (kind === "owner") {
++                    s.worker.fire(999);
++                } else if (kind === "frame") {
++                    s.frame();
++                } else {
++                    s.worker.fire();
++                }
++            });
++            assert(s.worker.terminated, kind);
++            assert.equal(s.frames.size, 0, kind);
++        }
++    });
++
++    it("rejects a decreasing clock without charging negative elapsed", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.worker.fire();
++        s.time(99);
++        assert.throws(() => s.worker.fire(), /monotonic/);
++        assert.deepEqual(s.elapsed, [0]);
++    });
++
++    for (const event of ["pointer", "keyboard", "text", "focus"]) {
++        it(`core-call boundary defers ${event} pause/destroy/reload until unlock`, () => {
++            for (const action of ["pause", "destroy", "reload"]) {
++                const s = setup();
++                s.owner.play(true);
++                s.owner.enterCoreCall();
++                s.events.push(event);
++                if (action === "pause") {
++                    s.owner.play(false);
++                } else {
++                    s.owner.destroy();
++                }
++                assert.equal(s.events.at(-1), event);
++                // The Rust boundary retains this owner token even if InnerPlayer clears/replaces it.
++                s.events.push("unlock");
++                s.owner.leaveCoreCall();
++                assert.deepEqual(s.events.slice(-2), [
++                    "unlock",
++                    action === "pause" ? "playing:false" : "destroy",
++                ]);
++                if (action === "reload") {
++                    const replacement = setup();
++                    replacement.owner.play(true);
++                    replacement.worker.fire();
++                    s.worker.fire();
++                    assert.deepEqual(replacement.elapsed, [0]);
++                }
++            }
++        });
++    }
++
++    it("cannot rearm after reentrant policy-application pause or destroy", () => {
++        for (const close of [false, true]) {
++            const s = setup();
++            s.host.playing = (active) => {
++                if (active) {
++                    s.owner.enterCoreCall();
++                    if (close) {
++                        s.owner.destroy();
++                    } else {
++                        s.owner.play(false);
++                    }
++                    s.owner.leaveCoreCall();
++                }
++            };
++            s.owner.play(true);
++            assert.equal(
++                s.worker.messages.filter((m) => m.delay !== undefined).length,
++                0,
++            );
++            assert.equal(s.worker.terminated, close);
++        }
++    });
++
++    it("surfaces cancellation failure but still releases the instance", () => {
++        const s = setup();
++        s.owner.play(true);
++        s.host.cancelFrame = () => {
++            throw new Error("cancel failed");
++        };
++        assert.throws(() => s.owner.destroy(), /cancel failed/);
++        assert(s.worker.terminated);
++        assert.equal(s.events.at(-1), "destroy");
++    });
++
++    it("rejects duplicate completed wakeups/RAFs rather than treating them as cancellation", () => {
++        const s = setup();
++        s.owner.play(true);
++        const wake = s.worker.messages.at(-1)!.generation;
++        s.worker.fire(wake);
++        assert.throws(() => s.worker.fire(wake), /owner\/generation/);
++        const r = setup();
++        const frame = r.frames.values().next().value!;
++        r.frame();
++        assert.throws(frame, /presentation callback owner/);
++    });
++
++    it("rejects malformed wakeups, not mistaking unknown data for canceled tasks", () => {
++        for (const data of [0, -1, 0.5, NaN, "tick", {}]) {
++            const s = setup();
++            s.owner.play(true);
++            assert.throws(
++                () => s.worker.onmessage!({ data }),
++                /owner\/generation/,
++            );
++            assert(s.worker.terminated);
++        }
++    });
++
++    it("uses the actual worker source with one timeout and no worker clock", async () => {
++        const saved = {
++            worker: globalThis.Worker,
++            create: URL.createObjectURL,
++            revoke: URL.revokeObjectURL,
++        };
++        let blob: Blob | undefined;
++        URL.createObjectURL = (value) => {
++            assert(value instanceof Blob);
++            blob = value;
++            return "blob:test";
++        };
++        URL.revokeObjectURL = () => {};
++        globalThis.Worker = function () {
++            return {};
++        } as unknown as typeof Worker;
++        try {
++            createAdvancementWorker();
++            assert(blob);
++            let next = 0;
++            const timers = new Map<number, () => void>();
++            const messages: unknown[] = [];
++            const self = {
++                onmessage: (_event: { data: unknown }) => {},
++                postMessage: (value: unknown) => messages.push(value),
++            };
++            runInNewContext(await blob.text(), {
++                self,
++                clearTimeout: (id: number) => timers.delete(id),
++                setTimeout: (callback: () => void) => {
++                    timers.set(++next, callback);
++                    return next;
++                },
++            });
++            self.onmessage({ data: { generation: 1, delay: 10 } });
++            self.onmessage({ data: { generation: 2, delay: 20 } });
++            assert.equal(timers.size, 1);
++            const [id, callback] = timers.entries().next().value!;
++            timers.delete(id);
++            callback();
++            assert.deepEqual(messages, [2]);
++            assert.equal(timers.size, 0);
++            self.onmessage({ data: { generation: 3, delay: 10 } });
++            self.onmessage({ data: { generation: 4 } });
++            assert.equal(timers.size, 0);
++        } finally {
++            globalThis.Worker = saved.worker;
++            URL.createObjectURL = saved.create;
++            URL.revokeObjectURL = saved.revoke;
++        }
++    });
++
++    it("worker construction failure is explicit and revokes its URL", () => {
++        const oldWorker = globalThis.Worker;
++        const oldRevoke = URL.revokeObjectURL;
++        let revoked = false;
++        globalThis.Worker = function () {
++            throw new Error("CSP worker denied");
++        } as unknown as typeof Worker;
++        URL.revokeObjectURL = (url) => {
++            revoked = true;
++            oldRevoke(url);
++        };
++        try {
++            assert.throws(createAdvancementWorker, /CSP worker denied/);
++            assert(revoked);
++        } finally {
++            globalThis.Worker = oldWorker;
++            URL.revokeObjectURL = oldRevoke;
++        }
++    });
++});
+diff --git a/web/src/lib.rs b/web/src/lib.rs
+index e47ac4c..0d90679 100644
+--- a/web/src/lib.rs
++++ b/web/src/lib.rs
+@@ -28,7 +28,7 @@ use std::rc::Rc;
+ use std::str::FromStr;
+ use std::sync::Once;
+ use std::sync::{Arc, Mutex};
+-use std::{cell::RefCell, error::Error, num::NonZeroI32};
++use std::{cell::RefCell, error::Error};
+ use tracing_subscriber::layer::{Layered, SubscriberExt};
+ use tracing_subscriber::registry::Registry;
+ use tracing_wasm::{WASMLayer, WASMLayerConfigBuilder};
+@@ -62,8 +62,6 @@ thread_local! {
+     static CURRENT_CONTEXT: RefCell<Option<*mut UpdateContext<'static>>> = const { RefCell::new(None) };
+ }
+ 
+-type AnimationHandler = Closure<dyn FnMut(f64)>;
+-
+ struct JsCallback<E> {
+     target: EventTarget,
+     name: &'static str,
+@@ -122,10 +120,6 @@ struct RuffleInstance {
+     canvas_height: i32,
+     device_pixel_ratio: f64,
+     window: Window,
+-    timestamp: Option<f64>,
+-    animation_handler: Option<AnimationHandler>, // requestAnimationFrame callback
+-    animation_handler_id: Option<NonZeroI32>,    // requestAnimationFrame id
+-    background_tick_mode: bool,
+     mouse_move_callback: Option<JsCallback<PointerEvent>>,
+     mouse_enter_callback: Option<JsCallback<PointerEvent>>,
+     mouse_leave_callback: Option<JsCallback<PointerEvent>>,
+@@ -154,6 +148,12 @@ unsafe extern "C" {
+     #[derive(Clone)]
+     pub type JavascriptPlayer;
+ 
++    #[wasm_bindgen(method, js_name = "enterCoreCall")]
++    fn enter_core_call(this: &JavascriptPlayer) -> JsValue;
++
++    #[wasm_bindgen(method, js_name = "leaveCoreCall")]
++    fn leave_core_call(this: &JavascriptPlayer, owner: &JsValue);
++
+     #[wasm_bindgen(method, js_name = "onCallbackAvailable")]
+     fn on_callback_available(this: &JavascriptPlayer, name: &str);
+ 
+@@ -309,52 +309,31 @@ impl RuffleHandle {
+         Ok(())
+     }
+ 
+-    pub fn play(&self) {
+-        let _ = self.with_core_mut(|core| {
+-            core.set_is_playing(true);
+-        });
++    pub fn play(&self) -> Result<(), JsValue> {
++        self.with_core_mut(|core| core.set_is_playing(true))
++            .map_err(|e| JsError::new(&e.to_string()).into())
+     }
+ 
+-    pub fn pause(&self) {
+-        let _ = self.with_core_mut(|core| {
+-            core.set_is_playing(false);
+-        });
++    pub fn pause(&self) -> Result<(), JsValue> {
++        self.with_core_mut(|core| core.set_is_playing(false))
++            .map_err(|e| JsError::new(&e.to_string()).into())
+     }
+ 
+     pub fn is_playing(&self) -> bool {
+         self.with_core(|core| core.is_playing()).unwrap_or_default()
+     }
+ 
+-    /// Switches to background tick mode, pausing the normal animation loop.
+-    /// Use `tick_for_background` to advance the player while the tab is hidden.
+-    pub fn enable_background_tick_mode(&self) {
+-        let _ = self.with_instance_mut(|instance| {
+-            if let Some(id) = instance.animation_handler_id.take() {
+-                let _ = instance.window.cancel_animation_frame(id.into());
+-            }
+-            instance.background_tick_mode = true;
+-        });
+-    }
+-
+-    /// Leaves background tick mode and reschedules the normal animation loop.
+-    /// Does not tick the core itself.
+-    pub fn restart_animation_loop(&self) {
+-        let _ = self.with_instance_mut(|instance| {
+-            instance.background_tick_mode = false;
+-            if let Some(handler) = &instance.animation_handler {
+-                let id = instance
+-                    .window
+-                    .request_animation_frame(handler.as_ref().unchecked_ref())
+-                    .unwrap_or_default();
+-                instance.animation_handler_id = NonZeroI32::new(id);
+-            }
+-        });
++    pub fn advance(&self, dt: f64) -> Result<f64, JsValue> {
++        if !dt.is_finite() || dt < 0.0 {
++            return Err(JsError::new("Invalid monotonic advancement delta").into());
++        }
++        self.tick(dt)
++            .map_err(|e| JsError::new(&e.to_string()).into())
+     }
+ 
+-    /// Ticks the game core once. Intended to be called from a Web Worker loop
+-    /// after calling `enable_background_tick_mode`.
+-    pub fn tick_for_background(&self, timestamp: f64) {
+-        self.tick(timestamp);
++    pub fn present(&self) -> Result<(), JsValue> {
++        self.render()
++            .map_err(|e| JsError::new(&e.to_string()).into())
+     }
+ 
+     pub fn has_focus(&self) -> bool {
+@@ -463,10 +442,10 @@ impl RuffleHandle {
+         let _ = self.with_core_mut(Player::clear_custom_menu_items);
+     }
+ 
+-    pub fn destroy(&self) {
+-        // Remove instance from the active list.
+-        let _ = self.remove_instance();
+-        // Instance is dropped at this point.
++    pub fn destroy(&self) -> Result<(), JsValue> {
++        self.remove_instance()
++            .map(drop)
++            .map_err(|e| JsError::new(&e.to_string()).into())
+     }
+ 
+     pub fn call_exposed_callback(
+@@ -552,9 +531,6 @@ impl RuffleHandle {
+             canvas_height: 0,
+             device_pixel_ratio: window.device_pixel_ratio(),
+             window: window.clone(),
+-            animation_handler: None,
+-            animation_handler_id: None,
+-            background_tick_mode: false,
+             mouse_move_callback: None,
+             mouse_enter_callback: None,
+             mouse_leave_callback: None,
+@@ -572,7 +548,6 @@ impl RuffleHandle {
+             window_blur_callback: None,
+             focus_on_press_callback: None,
+             webglcontextlost_callback: None,
+-            timestamp: None,
+             has_focus: false,
+             trace_observer: player.trace_observer,
+             log_subscriber,
+@@ -586,7 +561,7 @@ impl RuffleHandle {
+             .set_property("touch-action", "none")
+             .warn_on_error();
+ 
+-        // Register the instance and create the animation frame closure.
++        // Register the instance.
+         let ruffle = Self::add_instance(instance)?;
+ 
+         // For backward compatibility.
+@@ -595,19 +570,14 @@ impl RuffleHandle {
+         let shadow_host = Self::get_shadow_host(&parent);
+         Self::set_up_focus_management(ruffle, shadow_host.unwrap_or(parent))?;
+ 
+-        // Create the animation frame closure.
+         ruffle.with_instance_mut(|instance| {
+-            instance.animation_handler = Some(Closure::new(move |timestamp| {
+-                ruffle.tick(timestamp);
+-            }));
+-
+             // Create mouse move handler.
+             instance.mouse_move_callback = Some(JsCallback::register(
+                 &player.canvas,
+                 "pointermove",
+                 false,
+                 move |js_event: PointerEvent| {
+-                    let _ = ruffle.with_instance(move |instance| {
++                    let _ = ruffle.with_input(move |instance| {
+                         let event = PlayerEvent::MouseMove {
+                             x: js_event.offset_x() * instance.device_pixel_ratio,
+                             y: js_event.offset_y() * instance.device_pixel_ratio,
+@@ -628,7 +598,7 @@ impl RuffleHandle {
+                 "pointerenter",
+                 false,
+                 move |_js_event: PointerEvent| {
+-                    let _ = ruffle.with_instance(move |instance| {
++                    let _ = ruffle.with_input(move |instance| {
+                         let _ = instance.with_core_mut(|core| {
+                             core.set_mouse_in_stage(true);
+                         });
+@@ -642,7 +612,7 @@ impl RuffleHandle {
+                 "pointerleave",
+                 false,
+                 move |_js_event: PointerEvent| {
+-                    let _ = ruffle.with_instance(move |instance| {
++                    let _ = ruffle.with_input(move |instance| {
+                         let _ = instance.with_core_mut(|core| {
+                             core.set_mouse_in_stage(false);
+                             core.handle_event(PlayerEvent::MouseLeave);
+@@ -659,7 +629,7 @@ impl RuffleHandle {
+                 false,
+                 move |js_event: PointerEvent| {
+                     let js_player_callback = js_player_callback.clone();
+-                    let _ = ruffle.with_instance(move |instance| {
++                    let _ = ruffle.with_input(move |instance| {
+                         if let Some(target) = js_event.current_target() {
+                             let _ = target
+                                 .unchecked_ref::<Element>()
+@@ -679,9 +649,7 @@ impl RuffleHandle {
+                             // TODO The index should be provided by the browser, not calculated.
+                             index: None,
+                         };
+-                        let handled = instance
+-                            .with_core_mut(|core| core.handle_event(event))
+-                            .unwrap_or_default();
++                        let handled = instance.with_core_mut(|core| core.handle_event(event));
+ 
+                         if handled && matches!(button, MouseButton::Right) {
+                             js_player_callback.suppress_context_menu();
+@@ -698,7 +666,7 @@ impl RuffleHandle {
+                 "pointerup",
+                 false,
+                 move |js_event: PointerEvent| {
+-                    let _ = ruffle.with_instance(|instance| {
++                    let _ = ruffle.with_input(|instance| {
+                         if let Some(target) = js_event.current_target() {
+                             let _ = target
+                                 .unchecked_ref::<Element>()
+@@ -731,7 +699,7 @@ impl RuffleHandle {
+                 "wheel",
+                 false,
+                 move |js_event: WheelEvent| {
+-                    let _ = ruffle.with_instance(|instance| {
++                    let _ = ruffle.with_input(|instance| {
+                         let delta = match js_event.delta_mode() {
+                             WheelEvent::DOM_DELTA_LINE => {
+                                 MouseWheelDelta::Lines(-js_event.delta_y())
+@@ -774,7 +742,7 @@ impl RuffleHandle {
+                 "keydown",
+                 false,
+                 move |js_event: KeyboardEvent| {
+-                    let _ = ruffle.with_instance(|instance| {
++                    let _ = ruffle.with_input(|instance| {
+                         if instance.has_focus {
+                             let mut paste_event = false;
+                             let _ = instance.with_core_mut(|core| {
+@@ -815,7 +783,7 @@ impl RuffleHandle {
+                 "paste",
+                 false,
+                 move |js_event: ClipboardEvent| {
+-                    let _ = ruffle.with_instance(|instance| {
++                    let _ = ruffle.with_input(|instance| {
+                         if instance.has_focus {
+                             let _ = instance.with_core_mut(|core| {
+                                 let clipboard_content =
+@@ -843,7 +811,7 @@ impl RuffleHandle {
+                 "keyup",
+                 false,
+                 move |js_event: KeyboardEvent| {
+-                    let _ = ruffle.with_instance(|instance| {
++                    let _ = ruffle.with_input(|instance| {
+                         if instance.has_focus {
+                             let _ = instance.with_core_mut(|core| {
+                                 let key = web_input_to_ruffle_key_descriptor(&js_event);
+@@ -862,12 +830,10 @@ impl RuffleHandle {
+                 "webglcontextlost",
+                 false,
+                 move |_js_event: WebGlContextEvent| {
+-                    INSTANCES.with(|instances| {
+-                        if instances.borrow().len() >= 8 {
+-                            let _ = ruffle.remove_instance();
+-                            js_player_callback.reload_with_canvas_renderer();
+-                        }
+-                    });
++                    let exhausted = INSTANCES.with(|instances| instances.borrow().len() >= 8);
++                    if exhausted {
++                        js_player_callback.reload_with_canvas_renderer();
++                    }
+                 },
+             ));
+ 
+@@ -897,9 +863,6 @@ impl RuffleHandle {
+             ));
+         })?;
+ 
+-        // Set initial timestamp and do initial tick to start animation loop.
+-        ruffle.tick(0.0);
+-
+         Ok(ruffle)
+     }
+ 
+@@ -912,19 +875,24 @@ impl RuffleHandle {
+     }
+ 
+     fn set_focus(ruffle: RuffleHandle, focused: bool) {
+-        let _ = ruffle.with_instance_mut(|instance| {
+-            if instance.has_focus == focused {
+-                return;
+-            }
+-            instance.has_focus = focused;
+-            let _ = instance.with_core_mut(|core| {
+-                core.handle_event(if focused {
+-                    PlayerEvent::FocusGained
+-                } else {
+-                    PlayerEvent::FocusLost
+-                });
+-            });
+-        });
++        let changed = ruffle
++            .with_instance_mut(|instance| {
++                let changed = instance.has_focus != focused;
++                instance.has_focus = focused;
++                changed
++            })
++            .unwrap_or_else(|e| wasm_bindgen::throw_str(&e.to_string()));
++        if changed {
++            ruffle
++                .with_core_mut(|core| {
++                    core.handle_event(if focused {
++                        PlayerEvent::FocusGained
++                    } else {
++                        PlayerEvent::FocusLost
++                    });
++                })
++                .unwrap_or_else(|e| wasm_bindgen::throw_str(&e.to_string()));
++        }
+     }
+ 
+     fn set_up_focus_management(
+@@ -1116,6 +1084,20 @@ impl RuffleHandle {
+         ret
+     }
+ 
++    fn with_input<F, O>(self, f: F) -> O
++    where
++        F: FnOnce(&InputSnapshot) -> O,
++    {
++        let input = self
++            .with_instance(|instance| InputSnapshot {
++                handle: self,
++                device_pixel_ratio: instance.device_pixel_ratio,
++                has_focus: instance.has_focus,
++            })
++            .unwrap_or_else(|e| wasm_bindgen::throw_str(&e.to_string()));
++        f(&input)
++    }
++
+     /// Runs the given function on this instance's `Player`.
+     fn with_core_mut<F, O>(self, f: F) -> Result<O, RuffleInstanceError>
+     where
+@@ -1130,12 +1112,19 @@ impl RuffleHandle {
+                         tracing::subscriber::set_default(instance.log_subscriber.clone());
+                     // This clone lets us drop the instance to avoid potential double-borrows.
+                     let core = instance.core.clone();
++                    let js_player = instance.js_player.clone();
+                     drop(instance);
+                     drop(instances);
+-                    let mut core = core
+-                        .try_lock()
+-                        .map_err(|_| RuffleInstanceError::TryLockError)?;
+-                    Ok(f(&mut core))
++                    let owner = js_player.enter_core_call();
++                    let result = (|| {
++                        let mut core = core
++                            .try_lock()
++                            .map_err(|_| RuffleInstanceError::TryLockError)?;
++                        Ok(f(&mut core))
++                    })();
++                    // Deferred pause/destroy must run only after the player lock is released.
++                    js_player.leave_core_call(&owner);
++                    result
+                 } else {
+                     Err(RuffleInstanceError::InstanceNotFound)
+                 }
+@@ -1148,38 +1137,9 @@ impl RuffleHandle {
+         ret
+     }
+ 
+-    fn tick(self, timestamp: f64) {
+-        let mut dt = 0.0;
+-        let mut new_dimensions = None;
++    fn tick(self, dt: f64) -> Result<f64, RuffleInstanceError> {
+         let mut gamepad_button_events = Vec::new();
+-        let _ = self.with_instance_mut(|instance| {
+-            // Check for canvas resize.
+-            let canvas_width = instance.canvas.client_width();
+-            let canvas_height = instance.canvas.client_height();
+-            let device_pixel_ratio = instance.window.device_pixel_ratio(); // Changes via user zooming.
+-            if instance.canvas_width != canvas_width
+-                || instance.canvas_height != canvas_height
+-                || (instance.device_pixel_ratio - device_pixel_ratio).abs() >= f64::EPSILON
+-            {
+-                // If a canvas resizes, its drawing context will get scaled. You must reset
+-                // the width and height attributes of the canvas element to recreate the context.
+-                // (NOT the CSS width/height!)
+-                instance.canvas_width = canvas_width;
+-                instance.canvas_height = canvas_height;
+-                instance.device_pixel_ratio = device_pixel_ratio;
+-
+-                // The actual viewport is scaled by DPI, bigger than CSS pixels.
+-                let viewport_width = (f64::from(canvas_width) * device_pixel_ratio) as u32;
+-                let viewport_height = (f64::from(canvas_height) * device_pixel_ratio) as u32;
+-
+-                new_dimensions = Some((
+-                    instance.canvas.clone(),
+-                    viewport_width,
+-                    viewport_height,
+-                    device_pixel_ratio,
+-                ));
+-            }
+-
++        self.with_instance_mut(|instance| {
+             if let Ok(gamepads) = instance.window.navigator().get_gamepads()
+                 && let Some(gamepad) = gamepads.into_iter().next()
+                 && let Ok(gamepad) = gamepad.dyn_into::<WebGamepad>()
+@@ -1230,35 +1190,50 @@ impl RuffleHandle {
+                     instance.pressed_buttons = pressed_buttons;
+                 }
+             }
++        })?;
+ 
+-            // Request next animation frame (skipped in background tick mode).
+-            if !instance.background_tick_mode {
+-                if let Some(handler) = &instance.animation_handler {
+-                    let id = instance
+-                        .window
+-                        .request_animation_frame(handler.as_ref().unchecked_ref())
+-                        .unwrap_or_default();
+-                    instance.animation_handler_id = NonZeroI32::new(id);
+-                } else {
+-                    instance.animation_handler_id = None;
+-                }
++        self.with_core_mut(|core| {
++            for event in gamepad_button_events {
++                core.handle_event(event);
+             }
++            core.tick(FloatDuration::from_millis(dt));
++            core.time_til_next_frame().as_secs_f64() * 1000.0
++        })
++    }
+ 
+-            // Calculate the elapsed time since the last tick.
+-            dt = instance
+-                .timestamp
+-                .map_or(0.0, |prev_timestamp| timestamp - prev_timestamp);
++    fn render(self) -> Result<(), RuffleInstanceError> {
++        let mut new_dimensions = None;
++        self.with_instance_mut(|instance| {
++            // Check for canvas resize.
++            let canvas_width = instance.canvas.client_width();
++            let canvas_height = instance.canvas.client_height();
++            let device_pixel_ratio = instance.window.device_pixel_ratio(); // Changes via user zooming.
++            if instance.canvas_width != canvas_width
++                || instance.canvas_height != canvas_height
++                || (instance.device_pixel_ratio - device_pixel_ratio).abs() >= f64::EPSILON
++            {
++                // If a canvas resizes, its drawing context will get scaled. You must reset
++                // the width and height attributes of the canvas element to recreate the context.
++                // (NOT the CSS width/height!)
++                instance.canvas_width = canvas_width;
++                instance.canvas_height = canvas_height;
++                instance.device_pixel_ratio = device_pixel_ratio;
+ 
+-            // Store the timestamp of the last tick.
+-            instance.timestamp = Some(timestamp);
+-        });
++                // The actual viewport is scaled by DPI, bigger than CSS pixels.
++                let viewport_width = (f64::from(canvas_width) * device_pixel_ratio) as u32;
++                let viewport_height = (f64::from(canvas_height) * device_pixel_ratio) as u32;
+ 
+-        // Tick the Ruffle core.
+-        let _ = self.with_core_mut(|core| {
+-            for event in gamepad_button_events {
+-                core.handle_event(event);
++                new_dimensions = Some((
++                    instance.canvas.clone(),
++                    viewport_width,
++                    viewport_height,
++                    device_pixel_ratio,
++                ));
+             }
++        })?;
+ 
++        // Drop the instance borrow before Stage render callbacks can reenter JavaScript.
++        self.with_core_mut(|core| {
+             if let Some((ref canvas, viewport_width, viewport_height, device_pixel_ratio)) =
+                 new_dimensions
+             {
+@@ -1272,17 +1247,14 @@ impl RuffleHandle {
+                 });
+             }
+ 
+-            core.tick(FloatDuration::from_millis(dt));
+-
+-            // Render if the core signals a new frame, or if we resized.
+             if core.needs_render() || new_dimensions.is_some() {
+                 core.render();
+             }
+-        });
++        })
+     }
+ 
+     fn on_metadata(self, swf_header: &ruffle_core::swf::HeaderExt) {
+-        let _ = self.with_instance(|instance| {
++        let notification = self.with_instance(|instance| {
+             // Convert the background color to an HTML hex color ("#FFFFFF").
+             let background_color = swf_header
+                 .background_color()
+@@ -1298,10 +1270,31 @@ impl RuffleHandle {
+                 is_action_script_3: swf_header.is_action_script_3(),
+             };
+ 
+-            if let Ok(value) = serde_wasm_bindgen::to_value(&metadata) {
+-                instance.js_player.set_metadata(value);
+-            }
++            (
++                instance.js_player.clone(),
++                serde_wasm_bindgen::to_value(&metadata),
++            )
+         });
++        if let Ok((js_player, Ok(value))) = notification {
++            js_player.set_metadata(value);
++        }
++    }
++}
++
++struct InputSnapshot {
++    handle: RuffleHandle,
++    device_pixel_ratio: f64,
++    has_focus: bool,
++}
++
++impl InputSnapshot {
++    fn with_core_mut<F, O>(&self, f: F) -> O
++    where
++        F: FnOnce(&mut Player) -> O,
++    {
++        self.handle
++            .with_core_mut(f)
++            .unwrap_or_else(|e| wasm_bindgen::throw_str(&e.to_string()))
+     }
+ }
+ 
+@@ -1347,13 +1340,6 @@ impl Drop for RuffleInstance {
+             core.audio_mut().stop_all_sounds();
+             core.flush_shared_objects();
+         });
+-
+-        // Cancel the animation handler, if it's still active.
+-        if let Some(id) = self.animation_handler_id {
+-            self.window
+-                .cancel_animation_frame(id.into())
+-                .warn_on_error();
+-        }
+     }
+ }
+ 

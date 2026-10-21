@@ -49,6 +49,7 @@ def build(work, output):
         print('+ ' + ' '.join(command), flush=True)
         subprocess.run(command, cwd=cwd, env=env | (extra or {}), check=True)
     run(['npm', 'ci', '--no-audit', '--no-fund'], web)
+    run(['npm', 'run', 'test', '--workspace=ruffle-core', '--', '--grep', 'Advancement'], web)
     run(['cargo', 'test', '--locked', '-p', 'ruffle_core'])
     run(['cargo', 'test', '--locked', '-p', 'ruffle_render', '--features', 'tessellator'])
     run(['cargo', 'test', '--locked', '-p', 'ruffle_render_wgpu'])
