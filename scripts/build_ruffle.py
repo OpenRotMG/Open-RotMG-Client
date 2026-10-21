@@ -13,6 +13,29 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def wasm_rustflags(source, flags, env):
+    sysroot = Path(subprocess.check_output([env.get('RUSTC', 'rustc'), '--print', 'sysroot'],
+                                          cwd=source, env=env, text=True).strip())
+    rust_src = sysroot / 'lib/rustlib/src/rust'
+    if not rust_src.is_dir():
+        raise RuntimeError(f'Missing rust-src: {rust_src}')
+    cargo_home = Path(env.get('CARGO_HOME', Path(env.get('HOME', Path.home())) / '.cargo'))
+    mappings = {}
+    for root, virtual in [(cargo_home, '/cargo'), (rust_src, '/rust-src'), (source, '/ruffle')]:
+        root = source / root
+        for spelling in [root.absolute(), root.resolve()]:
+            if '\x1f' in str(spelling):
+                raise RuntimeError(f'Compiler path contains encoded-flags separator: {spelling!s}')
+            if str(spelling) in mappings and mappings[str(spelling)] != virtual:
+                raise RuntimeError(f'Conflicting compiler path roots: {spelling}')
+            mappings[str(spelling)] = virtual
+    args = ['--cfg=web_sys_unstable_apis', '--cfg=getrandom_backend="wasm_js"', '-Aunknown_lints'] + flags.split()
+    args += [f'--remap-path-prefix={root}={virtual}' for root, virtual in sorted(mappings.items(), key=lambda item: len(item[0]))]
+    print('WASM compiler arguments ' + json.dumps(args), flush=True)
+    # Cargo's encoded flags take precedence and preserve spaces inside source paths.
+    return '\x1f'.join(args)
+
+
 def build(work, output):
     lock = json.loads((ROOT / 'ruffle/lock.json').read_text())
     for command, expected in [([os.environ.get('RUSTC', 'rustc'), '--version'], 'rustc ' + lock['rustVersion'] + ' '),
@@ -62,11 +85,11 @@ def build(work, output):
         ('extensions', 'ruffle_web', '-C target-feature=+bulk-memory,+simd128,+nontrapping-fptoint,+sign-ext,+reference-types'),
         ('mvp', 'ruffle_web-wasm_mvp', '-C target-cpu=mvp')
     ]:
-        rustflags = '--cfg=web_sys_unstable_apis --cfg=getrandom_backend="wasm_js" -Aunknown_lints ' + flags
+        rustflags = wasm_rustflags(source, flags, env)
         command = ['cargo', 'build', '--locked', '-p', 'ruffle_web', '--target', 'wasm32-unknown-unknown', '--profile', 'web-wasm-' + flavor]
         if flavor == 'mvp':
             command += ['-Z', 'build-std=std,panic_abort']
-        run(command, extra={'RUSTFLAGS': rustflags, 'RUSTC_BOOTSTRAP': '1' if flavor == 'mvp' else '0',
+        run(command, extra={'CARGO_ENCODED_RUSTFLAGS': rustflags, 'RUSTC_BOOTSTRAP': '1' if flavor == 'mvp' else '0',
                             'CFLAGS_wasm32_unknown_unknown': '-mno-reference-types -mno-multivalue'})
         wasm = Path(env['CARGO_TARGET_DIR']) if 'CARGO_TARGET_DIR' in env else source / 'target'
         command = ['wasm-bindgen', str(wasm / 'wasm32-unknown-unknown' / ('web-wasm-' + flavor) / 'ruffle_web.wasm'),

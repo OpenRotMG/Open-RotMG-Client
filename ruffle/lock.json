@@ -1,11 +1,11 @@
 {
-  "version": "0.7.1-openrotmg.11",
+  "version": "0.7.1-openrotmg.12",
   "sourceCommit": "89a7049965f3090e706265670df309a5128233ac",
   "sourceSha256": "246d02cc1211e4f2cfae8b34e672f49679738eaffd5a72999f4828d925668d9a",
   "rustVersion": "1.99.0",
   "wasmBindgenVersion": "0.2.127",
   "buildDate": "2026-10-18T00:00:00.000Z",
-  "bundleSha256": "05c26e00899fec7cf8c859be5b59feae35eb896d648745ce2e2474e651eb0a55",
+  "bundleSha256": null,
   "patches": [
     "0001-alpha-mask.patch",
     "0002-disposed-bitmap-fill.patch",
