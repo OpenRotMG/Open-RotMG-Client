@@ -1,11 +1,11 @@
 {
-  "version": "0.7.1-openrotmg.8",
+  "version": "0.7.1-openrotmg.9",
   "sourceCommit": "89a7049965f3090e706265670df309a5128233ac",
   "sourceSha256": "246d02cc1211e4f2cfae8b34e672f49679738eaffd5a72999f4828d925668d9a",
   "rustVersion": "1.99.0",
   "wasmBindgenVersion": "0.2.127",
   "buildDate": "2026-10-18T00:00:00.000Z",
-  "bundleSha256": "30fd89bbafe3408b71a9f9182e7e162bad0334f5e081063975f4d1671a6c17db",
+  "bundleSha256": "b39a8dc814109358de278d3a79c4134e2aa0d5d3c5c2faf14215770ba595fa14",
   "patches": [
     "0001-alpha-mask.patch",
     "0002-disposed-bitmap-fill.patch",
@@ -16,6 +16,7 @@
     "0007-bitmap-gpu-clone.patch",
     "0008-wheel-accumulator.patch",
     "0009-safe-runtime-optimizations.patch",
-    "0010-local-cleanup-and-bitmap-rectangles.patch"
+    "0010-local-cleanup-and-bitmap-rectangles.patch",
+    "0011-pixelbender-program-cache.patch"
   ]
 }

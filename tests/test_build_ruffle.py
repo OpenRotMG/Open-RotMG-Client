@@ -1,4 +1,5 @@
 import io
+import re
 import subprocess
 import tempfile
 import sys
@@ -11,6 +12,11 @@ import build_ruffle
 
 
 class BuildPinTests(unittest.TestCase):
+    def test_pixelbender_rust_and_swf_fixtures_use_identical_bytecode(self):
+        fixture = build_ruffle.ROOT / 'ruffle/tests/openrotmg_pixelbender_program_cache'
+        hex_program = re.search(r'var hex:String = "([0-9a-f]+)"', (fixture / 'Test.as').read_text())[1]
+        self.assertEqual(bytes.fromhex(hex_program), (fixture / 'shader.pbj').read_bytes())
+
     def test_wrong_compiler_fails_before_download_or_build(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(
                 subprocess, 'check_output', return_value='rustc 0.0.0'), patch.object(

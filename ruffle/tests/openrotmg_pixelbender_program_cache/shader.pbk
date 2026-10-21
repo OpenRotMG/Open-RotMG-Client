@@ -1,0 +1,13 @@
+<languageVersion : 1.0;>
+kernel Cache {
+    input image4 src;
+    output pixel4 dst;
+    parameter float amount;
+    parameter int choice;
+    parameter float2 offset;
+    void evaluatePixel() {
+        dst = sampleNearest(src, outCoord() + offset);
+        dst.r *= amount;
+        dst.g = float(choice);
+    }
+}
