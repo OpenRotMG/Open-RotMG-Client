@@ -995,7 +995,7 @@ index 0000000..c482151
 +    });
 +});
 diff --git a/web/src/lib.rs b/web/src/lib.rs
-index e47ac4c..1ead7e0 100644
+index e47ac4c..f5bd910 100644
 --- a/web/src/lib.rs
 +++ b/web/src/lib.rs
 @@ -28,7 +28,7 @@ use std::rc::Rc;
@@ -1278,7 +1278,7 @@ index e47ac4c..1ead7e0 100644
 -        // Set initial timestamp and do initial tick to start animation loop.
 -        ruffle.tick(0.0);
 +        // Advancement may precede the first RAF, including movie startup scripts.
-+        ruffle.update_viewport()?;
++        ruffle.update_viewport(true)?;
  
          Ok(ruffle)
      }
@@ -1406,7 +1406,7 @@ index e47ac4c..1ead7e0 100644
              if let Ok(gamepads) = instance.window.navigator().get_gamepads()
                  && let Some(gamepad) = gamepads.into_iter().next()
                  && let Ok(gamepad) = gamepad.dyn_into::<WebGamepad>()
-@@ -1230,35 +1193,50 @@ impl RuffleHandle {
+@@ -1230,35 +1193,52 @@ impl RuffleHandle {
                      instance.pressed_buttons = pressed_buttons;
                  }
              }
@@ -1436,14 +1436,16 @@ index e47ac4c..1ead7e0 100644
 -            dt = instance
 -                .timestamp
 -                .map_or(0.0, |prev_timestamp| timestamp - prev_timestamp);
-+    fn update_viewport(self) -> Result<bool, RuffleInstanceError> {
++    fn update_viewport(self, initialize: bool) -> Result<bool, RuffleInstanceError> {
 +        let mut new_dimensions = None;
 +        self.with_instance_mut(|instance| {
 +            // Check for canvas resize.
 +            let canvas_width = instance.canvas.client_width();
 +            let canvas_height = instance.canvas.client_height();
 +            let device_pixel_ratio = instance.window.device_pixel_ratio(); // Changes via user zooming.
-+            if instance.canvas_width != canvas_width
++            // A real zero-sized initial viewport must also replace the builder defaults.
++            if initialize
++                || instance.canvas_width != canvas_width
 +                || instance.canvas_height != canvas_height
 +                || (instance.device_pixel_ratio - device_pixel_ratio).abs() >= f64::EPSILON
 +            {
@@ -1479,7 +1481,7 @@ index e47ac4c..1ead7e0 100644
              if let Some((ref canvas, viewport_width, viewport_height, device_pixel_ratio)) =
                  new_dimensions
              {
-@@ -1272,17 +1250,21 @@ impl RuffleHandle {
+@@ -1272,17 +1252,21 @@ impl RuffleHandle {
                  });
              }
  
@@ -1491,7 +1493,7 @@ index e47ac4c..1ead7e0 100644
 -            // Render if the core signals a new frame, or if we resized.
 -            if core.needs_render() || new_dimensions.is_some() {
 +    fn render(self) -> Result<(), RuffleInstanceError> {
-+        let resized = self.update_viewport()?;
++        let resized = self.update_viewport(false)?;
 +        self.with_core_mut(|core| {
 +            if core.needs_render() || resized {
                  core.render();
@@ -1506,7 +1508,7 @@ index e47ac4c..1ead7e0 100644
              // Convert the background color to an HTML hex color ("#FFFFFF").
              let background_color = swf_header
                  .background_color()
-@@ -1298,10 +1280,31 @@ impl RuffleHandle {
+@@ -1298,10 +1282,31 @@ impl RuffleHandle {
                  is_action_script_3: swf_header.is_action_script_3(),
              };
  
@@ -1541,7 +1543,7 @@ index e47ac4c..1ead7e0 100644
      }
  }
  
-@@ -1347,13 +1350,6 @@ impl Drop for RuffleInstance {
+@@ -1347,13 +1352,6 @@ impl Drop for RuffleInstance {
              core.audio_mut().stop_all_sounds();
              core.flush_shared_objects();
          });
@@ -1555,3 +1557,19 @@ index e47ac4c..1ead7e0 100644
      }
  }
  
+diff --git a/web/packages/core/src/internal/ui/static-styles.css b/web/packages/core/src/internal/ui/static-styles.css
+--- a/web/packages/core/src/internal/ui/static-styles.css
++++ b/web/packages/core/src/internal/ui/static-styles.css
+@@ -33,6 +33,12 @@
+ 
+ .hidden {
+     display: none !important;
++}
++
++/* Startup must measure the canvas even while the splash conceals it. */
++#container.hidden {
++    display: block !important;
++    visibility: hidden !important;
+ }
+ 
+ /* All of these use the dimensions specified by the embed. */
