@@ -51,6 +51,22 @@ jobs:
           echo '61d4a7dc85acfa0d2354ccc0b8361928c7e52a746d17f28ebaa795ed3dc1614a  bindgen.tar.gz' | sha256sum --check
           tar -xzf bindgen.tar.gz
           echo "$PWD/wasm-bindgen-$VERSION-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+      - name: Provision headless Vulkan software device
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends mesa-vulkan-drivers libvulkan1 vulkan-tools
+          dpkg-query --show mesa-vulkan-drivers libvulkan1 vulkan-tools
+          export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+          test -r "$VK_DRIVER_FILES"
+          test -r /usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/ruffle-xdg"
+          mkdir -m 700 "$XDG_RUNTIME_DIR"
+          echo "VK_DRIVER_FILES=$VK_DRIVER_FILES" >> "$GITHUB_ENV"
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          vulkaninfo --summary | tee "$RUNNER_TEMP/lavapipe-vulkaninfo.txt"
+          grep -E 'deviceType[[:space:]]*=[[:space:]]*PHYSICAL_DEVICE_TYPE_CPU' "$RUNNER_TEMP/lavapipe-vulkaninfo.txt"
+          grep -E 'deviceName[[:space:]]*=[[:space:]]*llvmpipe' "$RUNNER_TEMP/lavapipe-vulkaninfo.txt"
       - name: Build both variants and run Flash-reference tests
         run: python3 scripts/build_ruffle.py --work-dir "$RUNNER_TEMP/ruffle-build" --output "$PWD/ruffle-${{ steps.pins.outputs.version }}.zip"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
