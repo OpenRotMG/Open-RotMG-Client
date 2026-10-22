@@ -74,6 +74,38 @@ class ClientRoutingTests(unittest.TestCase):
 
 
 class RufflePreparationTests(unittest.TestCase):
+    def test_unsealed_runtime_rejects_before_network_cache_or_vendor_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vendor = root / 'vendor'
+            vendor.mkdir()
+            (vendor / 'ruffle.js').write_bytes(b'old selected runtime')
+            (root / '.ruffle-0.7.1-openrotmg.9.zip').write_bytes(b'old private cache')
+            before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+            for digest in [None, '', 'placeholder', '0' * 63, 123]:
+                with self.subTest(digest=digest), patch.object(run, 'ROOT', root), patch.object(
+                        run, 'SHA256', digest), patch.object(run, 'urlopen') as fetch:
+                    with self.assertRaisesRegex(RuntimeError, 'Unbuilt/unsealed'):
+                        run.prepare_ruffle()
+                    fetch.assert_not_called()
+                    self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes()
+                                              for p in root.rglob('*') if p.is_file()})
+
+    def test_unsealed_entrypoint_rejects_before_editor_preparation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            (root / 'ruffle').mkdir()
+            shutil.copyfile(run.ROOT / 'scripts/run.py', root / 'scripts/run.py')
+            (root / 'scripts/prepare_editor.py').write_text(
+                'def prepare_editor():\n    raise AssertionError("editor preparation must not run")\n')
+            (root / 'ruffle/lock.json').write_text(json.dumps(run.LOCK | {'bundleSha256': None}))
+            result = subprocess.run([sys.executable, str(root / 'scripts/run.py'), '--prepare-only'],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Unbuilt/unsealed', result.stderr)
+            self.assertNotIn('editor preparation must not run', result.stderr)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -119,9 +151,11 @@ class RufflePreparationTests(unittest.TestCase):
             self.assertEqual((self.root / 'vendor' / name).read_bytes(), expected)
 
     def test_corrupt_archive_rejected_before_touching_vendor(self):
-        self.prepare(self.bundle(self.files))
+        data = self.bundle(self.files)
+        self.prepare(data)
         (self.root / f'.ruffle-{run.VERSION}.zip').write_bytes(b'corrupt')
-        with patch.object(run, 'ROOT', self.root), redirect_stdout(io.StringIO()):
+        with patch.object(run, 'ROOT', self.root), patch.object(
+                run, 'SHA256', hashlib.sha256(data).hexdigest()), redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(RuntimeError, 'Ruffle checksum mismatch'):
                 run.prepare_ruffle()
         self.assertEqual((self.root / 'vendor/ruffle.js').read_bytes(), b'loader')

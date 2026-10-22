@@ -1,0 +1,637 @@
+diff --git a/core/src/avm2/globals/flash/display/shader_data.rs b/core/src/avm2/globals/flash/display/shader_data.rs
+index 1a6944d..6206fb2 100644
+--- a/core/src/avm2/globals/flash/display/shader_data.rs
++++ b/core/src/avm2/globals/flash/display/shader_data.rs
+@@ -81,7 +81,7 @@ pub fn _set_byte_code<'gc>(
+     let shader_handle = activation
+         .context
+         .renderer
+-        .compile_pixelbender_shader(shader)
++        .compile_pixelbender_shader(shader, bytecode.bytes())
+         .expect("Failed to compile PixelBender shader");
+ 
+     this.as_shader_data()
+diff --git a/render/canvas/src/lib.rs b/render/canvas/src/lib.rs
+index 55a4042..085ea0b 100644
+--- a/render/canvas/src/lib.rs
++++ b/render/canvas/src/lib.rs
+@@ -573,6 +573,7 @@ impl RenderBackend for WebCanvasRenderBackend {
+     fn compile_pixelbender_shader(
+         &mut self,
+         _shader: ruffle_render::pixel_bender::PixelBenderShader,
++        _bytecode: &[u8],
+     ) -> Result<ruffle_render::pixel_bender::PixelBenderShaderHandle, Error> {
+         Err(Error::Unimplemented("compile_pixelbender_shader".into()))
+     }
+diff --git a/render/src/backend.rs b/render/src/backend.rs
+index 7e65a09..6c90dd4 100644
+--- a/render/src/backend.rs
++++ b/render/src/backend.rs
+@@ -112,9 +112,11 @@ pub trait RenderBackend: Any {
+ 
+     fn set_quality(&mut self, quality: StageQuality);
+ 
++    /// `bytecode` must be the original bytes parsed into `shader`, so immutable programs can be reused exactly.
+     fn compile_pixelbender_shader(
+         &mut self,
+         shader: PixelBenderShader,
++        bytecode: &[u8],
+     ) -> Result<PixelBenderShaderHandle, Error>;
+ 
+     fn run_pixelbender_shader(
+diff --git a/render/src/backend/null.rs b/render/src/backend/null.rs
+index d5cef8f..1cc4739 100644
+--- a/render/src/backend/null.rs
++++ b/render/src/backend/null.rs
+@@ -137,6 +137,7 @@ impl RenderBackend for NullRenderer {
+     fn compile_pixelbender_shader(
+         &mut self,
+         _shader: PixelBenderShader,
++        _bytecode: &[u8],
+     ) -> Result<PixelBenderShaderHandle, Error> {
+         Err(Error::Unimplemented(
+             "Pixel bender shader compilation".into(),
+diff --git a/render/src/bitmap/atlas.rs b/render/src/bitmap/atlas.rs
+index 3582ce5..ad2e53d 100644
+--- a/render/src/bitmap/atlas.rs
++++ b/render/src/bitmap/atlas.rs
+@@ -329,6 +329,7 @@ mod test {
+         fn compile_pixelbender_shader(
+             &mut self,
+             _shader: PixelBenderShader,
++            _bytecode: &[u8],
+         ) -> Result<PixelBenderShaderHandle, Error> {
+             unimplemented!()
+         }
+diff --git a/render/webgl/src/lib.rs b/render/webgl/src/lib.rs
+index 510d0e4..1c8beae 100644
+--- a/render/webgl/src/lib.rs
++++ b/render/webgl/src/lib.rs
+@@ -1216,6 +1216,7 @@ impl RenderBackend for WebGlRenderBackend {
+     fn compile_pixelbender_shader(
+         &mut self,
+         _shader: ruffle_render::pixel_bender::PixelBenderShader,
++        _bytecode: &[u8],
+     ) -> Result<ruffle_render::pixel_bender::PixelBenderShaderHandle, BitmapError> {
+         Err(BitmapError::Unimplemented(
+             "compile_pixelbender_shader".into(),
+diff --git a/render/wgpu/src/backend.rs b/render/wgpu/src/backend.rs
+index 4baaee9..2f84915 100644
+--- a/render/wgpu/src/backend.rs
++++ b/render/wgpu/src/backend.rs
+@@ -974,8 +974,9 @@ impl<T: RenderTarget + 'static> RenderBackend for WgpuRenderBackend<T> {
+     fn compile_pixelbender_shader(
+         &mut self,
+         shader: PixelBenderShader,
++        bytecode: &[u8],
+     ) -> Result<PixelBenderShaderHandle, BitmapError> {
+-        self.compile_pixelbender_shader_impl(shader)
++        self.compile_pixelbender_shader_impl(shader, bytecode)
+     }
+ 
+     fn run_pixelbender_shader(
+diff --git a/render/wgpu/src/descriptors.rs b/render/wgpu/src/descriptors.rs
+index e12f4bb..2bd30da 100644
+--- a/render/wgpu/src/descriptors.rs
++++ b/render/wgpu/src/descriptors.rs
+@@ -24,6 +24,7 @@ pub struct Descriptors {
+     pub shaders: Shaders,
+     pipelines: Mutex<FnvHashMap<(u32, wgpu::TextureFormat), Arc<Pipelines>>>,
+     pub filters: Filters,
++    pub(crate) pixel_bender_programs: Mutex<crate::pixel_bender::PixelBenderProgramCache>,
+ }
+ 
+ impl Debug for Descriptors {
+@@ -61,6 +62,7 @@ impl Descriptors {
+             shaders,
+             pipelines: Default::default(),
+             filters,
++            pixel_bender_programs: Default::default(),
+         }
+     }
+ 
+diff --git a/render/wgpu/src/pixel_bender.rs b/render/wgpu/src/pixel_bender.rs
+index ea1e1e3..d6599ae 100644
+--- a/render/wgpu/src/pixel_bender.rs
++++ b/render/wgpu/src/pixel_bender.rs
+@@ -1,7 +1,9 @@
++use lru::LruCache;
+ use std::any::Any;
+ use std::cell::RefCell;
+ use std::collections::HashMap;
+-use std::num::NonZeroU64;
++use std::num::{NonZeroU64, NonZeroUsize};
++use std::sync::{Mutex, OnceLock};
+ use std::{borrow::Cow, cell::Cell, sync::Arc};
+ 
+ use indexmap::IndexMap;
+@@ -29,21 +31,87 @@ use crate::{
+ 
+ #[derive(Debug)]
+ pub struct PixelBenderWgpuShader {
++    program: Arc<PixelBenderProgram>,
++    shader: PixelBenderShader,
++    float_parameters_buffer: wgpu::Buffer,
++    int_parameters_buffer: wgpu::Buffer,
++    zeroed_out_of_range_mode: wgpu::Buffer,
++    staging_belt: RefCell<StagingBelt>,
++}
++
++#[derive(Debug)]
++struct PixelBenderProgram {
++    id: usize,
+     bind_group_layout: wgpu::BindGroupLayout,
+     pipeline_layout: PipelineLayout,
+-    pipelines: RefCell<HashMap<(u32, wgpu::TextureFormat), RenderPipeline>>,
++    pipelines: Mutex<HashMap<(u32, TextureFormat), Arc<OnceLock<RenderPipeline>>>>,
+     vertex_shader: wgpu::ShaderModule,
+     fragment_shader: wgpu::ShaderModule,
+-    shader: PixelBenderShader,
+-    float_parameters_buffer: wgpu::Buffer,
+     float_parameters_buffer_size: u64,
+-    int_parameters_buffer: wgpu::Buffer,
+     int_parameters_buffer_size: u64,
+-    zeroed_out_of_range_mode: wgpu::Buffer,
+-    staging_belt: RefCell<StagingBelt>,
+ }
+ 
+-impl PixelBenderWgpuShader {
++struct PixelBenderProgramSlot {
++    id: usize,
++    program: OnceLock<Arc<PixelBenderProgram>>,
++}
++
++pub(crate) struct PixelBenderProgramCache {
++    programs: LruCache<Vec<u8>, Arc<PixelBenderProgramSlot>>,
++    hits: usize,
++    misses: usize,
++    evictions: usize,
++}
++
++impl Default for PixelBenderProgramCache {
++    fn default() -> Self {
++        Self {
++            // Match the small compiled-program working set used by ShaderPairAgal.
++            programs: LruCache::new(NonZeroUsize::new(2).unwrap()),
++            hits: 0,
++            misses: 0,
++            evictions: 0,
++        }
++    }
++}
++
++impl PixelBenderProgramCache {
++    fn slot(&mut self, bytecode: &[u8]) -> Arc<PixelBenderProgramSlot> {
++        let (slot, hit) = if let Some(slot) = self.programs.get(bytecode) {
++            self.hits += 1;
++            (slot.clone(), true)
++        } else {
++            self.misses += 1;
++            let slot = Arc::new(PixelBenderProgramSlot {
++                id: self.misses,
++                program: OnceLock::new(),
++            });
++            self.evictions += usize::from(
++                self.programs
++                    .push(bytecode.to_vec(), slot.clone())
++                    .is_some(),
++            );
++            tracing::debug!(
++                program = slot.id,
++                ?bytecode,
++                "PixelBender exact program key"
++            );
++            (slot, false)
++        };
++        tracing::info!(
++            program = slot.id,
++            hit,
++            hits = self.hits,
++            misses = self.misses,
++            evictions = self.evictions,
++            resident = self.programs.len(),
++            "PixelBender program cache"
++        );
++        slot
++    }
++}
++
++impl PixelBenderProgram {
+     /// Gets a `RenderPipeline` for the specified sample count
+     fn get_pipeline(
+         &self,
+@@ -51,47 +119,59 @@ impl PixelBenderWgpuShader {
+         samples: u32,
+         format: TextureFormat,
+     ) -> wgpu::RenderPipeline {
+-        self.pipelines
+-            .borrow_mut()
++        let slot = self
++            .pipelines
++            .lock()
++            .expect("PixelBender pipelines lock poisoned")
+             .entry((samples, format))
+-            .or_insert_with(|| {
+-                descriptors
+-                    .device
+-                    .create_render_pipeline(&RenderPipelineDescriptor {
+-                        label: create_debug_label!("PixelBender shader pipeline").as_deref(),
+-                        layout: Some(&self.pipeline_layout),
+-                        vertex: VertexState {
+-                            module: &self.vertex_shader,
+-                            entry_point: Some(naga_pixelbender::VERTEX_SHADER_ENTRYPOINT),
+-                            buffers: &VERTEX_BUFFERS_DESCRIPTION_FILTERS,
+-                            compilation_options: Default::default(),
+-                        },
+-                        fragment: Some(wgpu::FragmentState {
+-                            module: &self.fragment_shader,
+-                            entry_point: Some(naga_pixelbender::FRAGMENT_SHADER_ENTRYPOINT),
+-                            targets: &[Some(ColorTargetState {
+-                                format,
+-                                // FIXME - what should this be?
+-                                blend: Some(wgpu::BlendState {
+-                                    color: BlendComponent::OVER,
+-                                    alpha: BlendComponent::OVER,
+-                                }),
+-                                write_mask: ColorWrites::all(),
+-                            })],
+-                            compilation_options: Default::default(),
+-                        }),
+-                        primitive: Default::default(),
+-                        depth_stencil: None,
+-                        multisample: wgpu::MultisampleState {
+-                            count: samples,
+-                            mask: !0,
+-                            alpha_to_coverage_enabled: false,
+-                        },
+-                        multiview_mask: None,
+-                        cache: None,
+-                    })
+-            })
+-            .clone()
++            .or_default()
++            .clone();
++        slot.get_or_init(|| {
++            let pipeline = descriptors
++                .device
++                .create_render_pipeline(&RenderPipelineDescriptor {
++                    label: create_debug_label!("PixelBender shader pipeline").as_deref(),
++                    layout: Some(&self.pipeline_layout),
++                    vertex: VertexState {
++                        module: &self.vertex_shader,
++                        entry_point: Some(naga_pixelbender::VERTEX_SHADER_ENTRYPOINT),
++                        buffers: &VERTEX_BUFFERS_DESCRIPTION_FILTERS,
++                        compilation_options: Default::default(),
++                    },
++                    fragment: Some(wgpu::FragmentState {
++                        module: &self.fragment_shader,
++                        entry_point: Some(naga_pixelbender::FRAGMENT_SHADER_ENTRYPOINT),
++                        targets: &[Some(ColorTargetState {
++                            format,
++                            // FIXME - what should this be?
++                            blend: Some(wgpu::BlendState {
++                                color: BlendComponent::OVER,
++                                alpha: BlendComponent::OVER,
++                            }),
++                            write_mask: ColorWrites::all(),
++                        })],
++                        compilation_options: Default::default(),
++                    }),
++                    primitive: Default::default(),
++                    depth_stencil: None,
++                    multisample: wgpu::MultisampleState {
++                        count: samples,
++                        mask: !0,
++                        alpha_to_coverage_enabled: false,
++                    },
++                    multiview_mask: None,
++                    cache: None,
++                });
++            tracing::info!(
++                program = self.id,
++                device = ?descriptors.device,
++                samples,
++                ?format,
++                "PixelBender pipeline created"
++            );
++            pipeline
++        })
++        .clone()
+     }
+ }
+ 
+@@ -105,8 +185,8 @@ pub fn as_cache_holder(handle: &PixelBenderShaderHandle) -> &PixelBenderWgpuShad
+     <dyn Any>::downcast_ref(&*handle.0).unwrap()
+ }
+ 
+-impl PixelBenderWgpuShader {
+-    pub fn new(descriptors: &Descriptors, shader: PixelBenderShader) -> PixelBenderWgpuShader {
++impl PixelBenderProgram {
++    fn new(descriptors: &Descriptors, shader: &PixelBenderShader, id: usize) -> Self {
+         let mut layout_entries = vec![
+             // One sampler per filter/wrapping combination - see BitmapFilters
+             // An AGAL shader can use any of these samplers, so
+@@ -199,14 +279,56 @@ impl PixelBenderWgpuShader {
+                 });
+ 
+         let shaders =
+-            naga_pixelbender::ShaderBuilder::build(&shader).expect("Failed to compile shader");
++            naga_pixelbender::ShaderBuilder::build(shader).expect("Failed to compile shader");
+ 
++        let vertex_shader = descriptors
++            .device
++            .create_shader_module(ShaderModuleDescriptor {
++                label: None,
++                source: wgpu::ShaderSource::Naga(Cow::Owned(shaders.vertex)),
++            });
++
++        let fragment_shader = descriptors
++            .device
++            .create_shader_module(ShaderModuleDescriptor {
++                label: None,
++                source: wgpu::ShaderSource::Naga(Cow::Owned(shaders.fragment)),
++            });
++
++        let program = Self {
++            id,
++            bind_group_layout,
++            pipeline_layout,
++            pipelines: Default::default(),
++            vertex_shader,
++            fragment_shader,
++            float_parameters_buffer_size: shaders.float_parameters_buffer_size,
++            int_parameters_buffer_size: shaders.int_parameters_buffer_size,
++        };
++        tracing::info!(program = id, device = ?descriptors.device, "PixelBender program compiled");
++        program
++    }
++}
++
++impl PixelBenderWgpuShader {
++    pub fn new(descriptors: &Descriptors, shader: PixelBenderShader, bytecode: &[u8]) -> Self {
++        let _span = tracing::info_span!("PixelBender", device = ?descriptors.device).entered();
++        let slot = descriptors
++            .pixel_bender_programs
++            .lock()
++            .expect("PixelBender programs lock poisoned")
++            .slot(bytecode);
++        // GPU validation may call back into the host; never hold the device cache lock here.
++        let program = slot
++            .program
++            .get_or_init(|| Arc::new(PixelBenderProgram::new(descriptors, &shader, slot.id)))
++            .clone();
+         let float_label =
+             create_debug_label!("PixelBender float parameters buffer for {:?}", shader.name);
+ 
+         let float_parameters_buffer = descriptors.device.create_buffer(&BufferDescriptor {
+             label: float_label.as_deref(),
+-            size: shaders.float_parameters_buffer_size,
++            size: program.float_parameters_buffer_size,
+             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+             mapped_at_creation: false,
+         });
+@@ -216,7 +338,7 @@ impl PixelBenderWgpuShader {
+ 
+         let int_parameters_buffer = descriptors.device.create_buffer(&BufferDescriptor {
+             label: int_label.as_deref(),
+-            size: shaders.int_parameters_buffer_size,
++            size: program.int_parameters_buffer_size,
+             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+             mapped_at_creation: false,
+         });
+@@ -224,38 +346,17 @@ impl PixelBenderWgpuShader {
+         let zeroed_out_of_range_mode = descriptors.device.create_buffer(&BufferDescriptor {
+             label: create_debug_label!("PixelBender zeroed_out_of_range_mode parameter buffer")
+                 .as_deref(),
+-            size: shaders.int_parameters_buffer_size,
++            size: program.int_parameters_buffer_size,
+             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+             mapped_at_creation: false,
+         });
+ 
+-        let vertex_shader = descriptors
+-            .device
+-            .create_shader_module(ShaderModuleDescriptor {
+-                label: None,
+-                source: wgpu::ShaderSource::Naga(Cow::Owned(shaders.vertex)),
+-            });
+-
+-        let fragment_shader = descriptors
+-            .device
+-            .create_shader_module(ShaderModuleDescriptor {
+-                label: None,
+-                source: wgpu::ShaderSource::Naga(Cow::Owned(shaders.fragment)),
+-            });
+-
+-        PixelBenderWgpuShader {
+-            bind_group_layout,
+-            pipeline_layout,
+-            pipelines: Default::default(),
++        Self {
++            program,
+             shader,
+-            vertex_shader,
+-            fragment_shader,
+             float_parameters_buffer,
+-            float_parameters_buffer_size: shaders.float_parameters_buffer_size,
+             int_parameters_buffer,
+-            int_parameters_buffer_size: shaders.int_parameters_buffer_size,
+             zeroed_out_of_range_mode,
+-            // FIXME - come up with a good chunk size
+             staging_belt: RefCell::new(StagingBelt::new(descriptors.device.clone(), 8)),
+         }
+     }
+@@ -338,8 +439,9 @@ impl<T: RenderTarget> WgpuRenderBackend<T> {
+     pub(super) fn compile_pixelbender_shader_impl(
+         &self,
+         shader: PixelBenderShader,
++        bytecode: &[u8],
+     ) -> Result<PixelBenderShaderHandle, BitmapError> {
+-        let handle = PixelBenderWgpuShader::new(&self.descriptors, shader);
++        let handle = PixelBenderWgpuShader::new(&self.descriptors, shader, bytecode);
+         Ok(PixelBenderShaderHandle(Arc::new(handle)))
+     }
+ }
+@@ -386,7 +488,9 @@ pub(super) fn run_pixelbender_shader_impl(
+             resource: BindingResource::Buffer(wgpu::BufferBinding {
+                 buffer: &compiled_shader.float_parameters_buffer,
+                 offset: 0,
+-                size: Some(NonZeroU64::new(compiled_shader.float_parameters_buffer_size).unwrap()),
++                size: Some(
++                    NonZeroU64::new(compiled_shader.program.float_parameters_buffer_size).unwrap(),
++                ),
+             }),
+         },
+         BindGroupEntry {
+@@ -394,7 +498,9 @@ pub(super) fn run_pixelbender_shader_impl(
+             resource: BindingResource::Buffer(wgpu::BufferBinding {
+                 buffer: &compiled_shader.int_parameters_buffer,
+                 offset: 0,
+-                size: Some(NonZeroU64::new(compiled_shader.int_parameters_buffer_size).unwrap()),
++                size: Some(
++                    NonZeroU64::new(compiled_shader.program.int_parameters_buffer_size).unwrap(),
++                ),
+             }),
+         },
+         BindGroupEntry {
+@@ -629,7 +735,7 @@ pub(super) fn run_pixelbender_shader_impl(
+         .device
+         .create_bind_group(&wgpu::BindGroupDescriptor {
+             label: None,
+-            layout: &compiled_shader.bind_group_layout,
++            layout: &compiled_shader.program.bind_group_layout,
+             entries: &bind_group_entries,
+         });
+ 
+@@ -643,7 +749,9 @@ pub(super) fn run_pixelbender_shader_impl(
+             usage: BufferUsages::VERTEX,
+         });
+ 
+-    let pipeline = compiled_shader.get_pipeline(descriptors, sample_count, target.format());
++    let pipeline = compiled_shader
++        .program
++        .get_pipeline(descriptors, sample_count, target.format());
+ 
+     let mut render_pass = render_command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+         label: Some("PixelBender render pass"),
+@@ -667,3 +775,140 @@ pub(super) fn run_pixelbender_shader_impl(
+ 
+     Ok(())
+ }
++
++#[cfg(all(test, not(target_family = "wasm")))]
++mod program_cache_tests {
++    use super::*;
++    use ruffle_render::pixel_bender::parse_shader;
++
++    const BYTECODE: &[u8] = include_bytes!(
++        "../../../tests/tests/swfs/avm2/openrotmg_pixelbender_program_cache/shader.pbj"
++    );
++
++    fn compile(descriptors: &Descriptors, bytecode: &[u8]) -> PixelBenderWgpuShader {
++        PixelBenderWgpuShader::new(descriptors, parse_shader(bytecode, true).unwrap(), bytecode)
++    }
++
++    #[test]
++    fn exact_bytes_and_bounded_retention() {
++        let mut cache = PixelBenderProgramCache::default();
++        let zero = cache.slot(&0.0_f32.to_bits().to_le_bytes());
++        assert!(Arc::ptr_eq(
++            &zero,
++            &cache.slot(&0.0_f32.to_bits().to_le_bytes())
++        ));
++        assert!(!Arc::ptr_eq(
++            &zero,
++            &cache.slot(&(-0.0_f32).to_bits().to_le_bytes())
++        ));
++        let nan = f32::NAN.to_bits().to_le_bytes();
++        let first = cache.slot(&nan);
++        assert!(Arc::ptr_eq(&first, &cache.slot(&nan)));
++        assert!(!Arc::ptr_eq(
++            &first,
++            &cache.slot(&(f32::NAN.to_bits() + 1).to_le_bytes())
++        ));
++        assert_eq!(cache.programs.len(), 2);
++        assert_eq!((cache.hits, cache.misses, cache.evictions), (2, 4, 2));
++        assert!(!Arc::ptr_eq(
++            &zero,
++            &cache.slot(&0.0_f32.to_bits().to_le_bytes())
++        ));
++    }
++
++    #[test]
++    fn programs_share_but_instance_state_and_device_variants_do_not() {
++        fn assert_send_sync<T: Send + Sync>() {}
++        assert_send_sync::<Descriptors>();
++        assert_send_sync::<PixelBenderProgram>();
++        let backend = WgpuRenderBackend::for_offscreen(
++            (1, 1),
++            wgpu::Backends::VULKAN,
++            wgpu::PowerPreference::LowPower,
++        )
++        .expect("PixelBender cache test requires the headless Vulkan renderer");
++        let descriptors = backend.descriptors();
++        let a = compile(descriptors, BYTECODE);
++        let b = compile(descriptors, BYTECODE);
++        assert!(Arc::ptr_eq(&a.program, &b.program));
++        assert!(!std::ptr::eq(&a.shader, &b.shader));
++        assert_ne!(a.float_parameters_buffer, b.float_parameters_buffer);
++        assert_ne!(a.int_parameters_buffer, b.int_parameters_buffer);
++        assert_ne!(a.zeroed_out_of_range_mode, b.zeroed_out_of_range_mode);
++        assert!(!std::ptr::eq(&a.staging_belt, &b.staging_belt));
++        let pipeline = a
++            .program
++            .get_pipeline(descriptors, 1, TextureFormat::Rgba8Unorm);
++        assert_eq!(
++            pipeline,
++            b.program
++                .get_pipeline(descriptors, 1, TextureFormat::Rgba8Unorm)
++        );
++        assert_ne!(
++            pipeline,
++            a.program
++                .get_pipeline(descriptors, 4, TextureFormat::Rgba8Unorm)
++        );
++        assert_ne!(
++            pipeline,
++            a.program
++                .get_pipeline(descriptors, 1, TextureFormat::Bgra8Unorm)
++        );
++        assert_eq!(a.program.pipelines.lock().unwrap().len(), 3);
++        let weak = Arc::downgrade(&a.program);
++        drop(b);
++        drop(a);
++        assert!(
++            weak.upgrade().is_some(),
++            "cache must survive ShaderData disposal"
++        );
++        let a = compile(descriptors, BYTECODE);
++        let mut other = BYTECODE.to_vec();
++        other[8] = b'B';
++        let b = compile(descriptors, &other);
++        other[8] = b'D';
++        let c = compile(descriptors, &other);
++        assert!(!Arc::ptr_eq(&b.program, &c.program));
++        assert!(!Arc::ptr_eq(&a.program, &c.program));
++        assert_eq!(
++            pipeline,
++            a.program
++                .get_pipeline(descriptors, 1, TextureFormat::Rgba8Unorm)
++        );
++        let recompiled = compile(descriptors, BYTECODE);
++        assert!(
++            !Arc::ptr_eq(&a.program, &recompiled.program),
++            "eviction only loses reuse"
++        );
++        assert_eq!(
++            descriptors
++                .pixel_bender_programs
++                .lock()
++                .unwrap()
++                .programs
++                .len(),
++            2
++        );
++        drop(a);
++        assert!(
++            weak.upgrade().is_none(),
++            "evicted inactive resources must be released"
++        );
++        let second = WgpuRenderBackend::for_offscreen(
++            (1, 1),
++            wgpu::Backends::VULKAN,
++            wgpu::PowerPreference::LowPower,
++        )
++        .expect("PixelBender cache test requires a second device");
++        let other_device = compile(second.descriptors(), BYTECODE);
++        assert!(!Arc::ptr_eq(&recompiled.program, &other_device.program));
++        assert_ne!(
++            recompiled
++                .program
++                .get_pipeline(descriptors, 1, TextureFormat::Rgba8Unorm),
++            other_device
++                .program
++                .get_pipeline(second.descriptors(), 1, TextureFormat::Rgba8Unorm)
++        );
++    }
++}

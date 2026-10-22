@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,7 +19,13 @@ URL = f'https://github.com/OpenRotMG/Open-RotMG-Client/releases/download/ruffle-
 SHA256 = LOCK['bundleSha256']
 
 
+def require_sealed_runtime():
+    if not isinstance(SHA256, str) or re.fullmatch(r'[0-9a-f]{64}', SHA256) is None:
+        raise RuntimeError('Unbuilt/unsealed Ruffle runtime; build and seal the bundle digest first')
+
+
 def prepare_ruffle():
+    require_sealed_runtime()
     cache = ROOT / f'.ruffle-{VERSION}.zip'
     if cache.exists():
         print(f'Using cached Ruffle {VERSION}', flush=True)
@@ -67,6 +74,7 @@ if __name__ == '__main__':
             parser.error(f'Missing sibling Rust server: {server / "Cargo.toml"}. Clone https://github.com/OpenRotMG/Open-RotMG-Server into a sibling server directory.')
         if shutil.which('cargo') is None:
             parser.error('Cargo not found. Install Rust/Cargo from https://rustup.rs/ and rerun.')
+    require_sealed_runtime()
     prepare_editor()
     prepare_ruffle()
     if not args.prepare_only:
