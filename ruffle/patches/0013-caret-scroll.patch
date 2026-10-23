@@ -1,0 +1,48 @@
+--- a/core/src/display_object/edit_text.rs
++++ b/core/src/display_object/edit_text.rs
+@@ -1507,6 +1507,36 @@
+         if old_selection != self.0.selection.get() {
+             self.invalidate_cached_bitmap();
+         }
++        if let Some(selection) = self.selection() {
++            self.scroll_to_caret(selection.to);
++        }
++    }
++
++    fn scroll_to_caret(self, position: usize) {
++        if !self.has_focus() || !self.is_editable() || self.is_multiline() || self.is_word_wrap() {
++            return;
++        }
++
++        let at_end = position == self.text_length();
++        let Some(bounds) = self.char_bounds(position.saturating_sub(usize::from(at_end))) else {
++            return;
++        };
++        let field = self.0.bounds.get();
++        let x = if at_end { bounds.x_max } else { bounds.x_min };
++        let x = (x - field.x_min - Self::GUTTER).to_pixels();
++        let width = (field.width() - Self::GUTTER * 2)
++            .max(Twips::ZERO)
++            .to_pixels();
++        let scroll = self.hscroll();
++        // Keep the insertion point inside the pixel-based scrollH viewport: https://airsdk.dev/reference/actionscript/3.0/flash/text/TextField.html#scrollH
++        let scroll = if x < scroll {
++            x.floor()
++        } else if x >= scroll + width {
++            (x - width + 1.0).ceil()
++        } else {
++            return;
++        };
++        self.set_hscroll(scroll.clamp(0.0, self.maxhscroll()));
+     }
+ 
+     /// Calculate and return the [`TextSelection`] at the given position
+@@ -1530,7 +1560,7 @@
+     pub fn reset_selection_blinking(self) {
+         if let Some(mut selection) = self.0.selection.get() {
+             selection.reset_blinking();
+-            self.0.selection.set(Some(selection));
++            self.set_selection(Some(selection));
+         }
+     }
+ 

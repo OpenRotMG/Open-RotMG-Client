@@ -76,7 +76,7 @@ def build(work, output):
     run(['cargo', 'test', '--locked', '-p', 'ruffle_core'])
     run(['cargo', 'test', '--locked', '-p', 'ruffle_render', '--features', 'tessellator'])
     run(['cargo', 'test', '--locked', '-p', 'ruffle_render_wgpu'])
-    for test in ['textline_', 'bitmapdata_draw', 'bitmapdata_clone', 'openrotmg_bitmap_compat', 'openrotmg_focus_activation', 'mouse_wheel_events', 'openrotmg_wheel_accumulator',
+    for test in ['textline_', 'bitmapdata_draw', 'bitmapdata_clone', 'openrotmg_bitmap_compat', 'openrotmg_focus_activation', 'openrotmg_caret_scroll', 'edittext_scrollh', 'mouse_wheel_events', 'openrotmg_wheel_accumulator',
                  'openrotmg_unused_locals', 'openrotmg_slot_read', 'openrotmg_sort_snapshot', 'openrotmg_bitmap_batch', 'openrotmg_pixelbender_program_cache']:
         run(['cargo', 'test', '--locked', '-p', 'tests', '--features', 'imgtests', '--test', 'tests', test, '--', '--test-threads', '4'])
     dist = web / 'packages/core/dist'
