@@ -5,7 +5,7 @@
   "rustVersion": "1.99.0",
   "wasmBindgenVersion": "0.2.127",
   "buildDate": "2026-10-23T00:00:00.000Z",
-  "bundleSha256": "",
+  "bundleSha256": "44ec18cb9050bf726e96ebf5e8f4d65d2fe042178e18ec9c84c8f9cf2d85545d",
   "patches": [
     "0001-alpha-mask.patch",
     "0002-disposed-bitmap-fill.patch",
