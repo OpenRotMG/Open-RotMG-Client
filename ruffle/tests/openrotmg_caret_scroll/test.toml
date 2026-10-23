@@ -1,0 +1,11 @@
+num_ticks = 11
+
+[player_options]
+with_default_font = true
+
+[[compilers]]
+type = "Asc"
+target = "test.swf"
+class = "Test"
+scripts = ["Test.as"]
+swf_version = 43

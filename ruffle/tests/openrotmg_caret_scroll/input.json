@@ -1,0 +1,20 @@
+[
+  {"type":"Wait"},
+  {"type":"TextInput","codepoint":"X"},
+  {"type":"Wait"},
+  {"type":"TextControl","code":"MoveLeftLine"},
+  {"type":"Wait"},
+  {"type":"TextControl","code":"MoveRightLine"},
+  {"type":"Wait"},
+  {"type":"TextControl","code":"MoveLeft"},
+  {"type":"Wait"},
+  {"type":"TextControl","code":"Delete"},
+  {"type":"Wait"},
+  {"type":"TextControl","code":"Backspace"},
+  {"type":"Wait"},
+  {"type":"TextControl","code":"SelectAll"},
+  {"type":"Wait"},
+  {"type":"TextInput","codepoint":"R"},
+  {"type":"Wait"},
+  {"type":"Wait"}
+]
