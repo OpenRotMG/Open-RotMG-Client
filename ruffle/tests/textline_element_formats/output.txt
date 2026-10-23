@@ -2,7 +2,7 @@ chat ff00 true
 chat ffffff true
 nested ffffff true
 nested ff00 true
-nested f0ff true
+nested ffff true
 continuation ff00 true
 continuation ffffff true
 unicode ff00 true

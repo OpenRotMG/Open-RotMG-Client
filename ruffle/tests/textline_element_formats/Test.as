@@ -7,7 +7,7 @@ package {
         public function Test() {
             var green:ElementFormat = new ElementFormat(null, 20, 0x00ff00);
             var white:ElementFormat = new ElementFormat(null, 20, 0xffffff);
-            var cyan:ElementFormat = new ElementFormat(null, 20, 0x00f0ff);
+            var cyan:ElementFormat = new ElementFormat(null, 20, 0x00ffff);
             var yellow:ElementFormat = new ElementFormat(null, 20, 0xffff00);
             check("chat", new GroupElement(new <ContentElement>[
                 new TextElement("<Player> ", green), new TextElement("Message", white)
@@ -16,7 +16,7 @@ package {
                 new TextElement("To: ", white), new GroupElement(new <ContentElement>[
                     new TextElement("<Player> ", green), new TextElement("Message", cyan)
                 ], yellow)
-            ]), [0xffffff, 0x00ff00, 0x00f0ff]);
+            ]), [0xffffff, 0x00ff00, 0x00ffff]);
             check("continuation", new GroupElement(new <ContentElement>[
                 new TextElement("<Player> \n", green), new TextElement("Message", white)
             ]), [0x00ff00, 0xffffff]);
