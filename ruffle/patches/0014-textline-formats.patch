@@ -1,0 +1,81 @@
+Subject: Preserve per-element TextLine formats
+
+--- a/core/src/avm2/globals/flash/text/engine/text_block.rs
++++ b/core/src/avm2/globals/flash/text/engine/text_block.rs
+@@ -9,7 +9,7 @@
+ use crate::avm2::value::Value;
+ use crate::display_object::{DisplayObject, EditText, TDisplayObject, TextLine};
+ use crate::fte::{TextBaselineValue, TextLineCreationResultValue, TextRotationValue};
+-use crate::html::{FormatSpans, TextFormat, TextSpan};
++use crate::html::{FormatSpans, TextSpan};
+ use crate::string::{WStr, WString};
+ use crate::{avm2_stub_getter, avm2_stub_setter};
+ 
+@@ -469,7 +469,6 @@
+         }
+     };
+ 
+-    // TODO don't discard the formatting
+     let text = spans.text();
+ 
+     if previous_position > text.len() {
+@@ -513,12 +512,14 @@
+ 
+     fallback.set_text(subtext, activation.context);
+ 
+-    let format = spans
+-        .span(0)
+-        .expect("Non-empty text should have at least one span")
+-        .get_text_format();
+-
+-    apply_format(activation, fallback, format, line_index);
++    apply_format(
++        activation,
++        fallback,
++        &spans,
++        previous_position,
++        next_position,
++        line_index,
++    );
+ 
+     // FIXME: This needs to use `intrinsic_bounds` to measure the width
+     // of the provided text, and set the width of the EditText to that.
+@@ -642,18 +643,30 @@
+ fn apply_format<'gc>(
+     activation: &mut Activation<'_, 'gc>,
+     edit_text: EditText<'gc>,
+-    format: TextFormat,
++    spans: &FormatSpans,
++    line_start: usize,
++    line_end: usize,
+     line_index: u32,
+ ) {
+     // TODO: Handle device font/non-device font properly
+     edit_text.set_is_device_font(activation.context, false);
+-    edit_text.set_text_format(
+-        0,
+-        edit_text.text_length(),
+-        format.clone(),
+-        activation.context,
+-    );
+-    edit_text.set_new_text_format(format);
++    // GroupElement children retain their formats: https://airsdk.dev/reference/actionscript/3.0/flash/text/engine/GroupElement.html
++    for (start, end, _, span) in spans.iter_spans() {
++        let start = start.max(line_start);
++        let end = end.min(line_end);
++        if start < end {
++            let format = span.get_text_format();
++            if start == line_start {
++                edit_text.set_new_text_format(format.clone());
++            }
++            edit_text.set_text_format(
++                start - line_start,
++                end - line_start,
++                format,
++                activation.context,
++            );
++        }
++    }
+ 
+     edit_text.set_word_wrap(true, activation.context);
+ 
