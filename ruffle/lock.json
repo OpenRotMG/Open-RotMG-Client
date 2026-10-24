@@ -1,11 +1,11 @@
 {
-  "version": "0.7.1-openrotmg.14",
+  "version": "0.7.1-openrotmg.15",
   "sourceCommit": "89a7049965f3090e706265670df309a5128233ac",
   "sourceSha256": "246d02cc1211e4f2cfae8b34e672f49679738eaffd5a72999f4828d925668d9a",
   "rustVersion": "1.99.0",
   "wasmBindgenVersion": "0.2.127",
-  "buildDate": "2026-10-23T00:00:00.000Z",
-  "bundleSha256": "44ec18cb9050bf726e96ebf5e8f4d65d2fe042178e18ec9c84c8f9cf2d85545d",
+  "buildDate": "2026-10-24T00:00:00.000Z",
+  "bundleSha256": "25a35b602855671a8ae91640b17313ee793e85d15b785d7989b3140392ca0d41",
   "patches": [
     "0001-alpha-mask.patch",
     "0002-disposed-bitmap-fill.patch",
@@ -20,6 +20,7 @@
     "0011-pixelbender-program-cache.patch",
     "0012-independent-advancement.patch",
     "0013-caret-scroll.patch",
-    "0014-textline-formats.patch"
+    "0014-textline-formats.patch",
+    "0015-inline-chat-graphics.patch"
   ]
 }

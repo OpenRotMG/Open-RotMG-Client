@@ -1,0 +1,952 @@
+diff --git a/core/src/avm2/globals/flash/text/engine/GraphicElement.as b/core/src/avm2/globals/flash/text/engine/GraphicElement.as
+index bf4626f..cafd41c 100644
+--- a/core/src/avm2/globals/flash/text/engine/GraphicElement.as
++++ b/core/src/avm2/globals/flash/text/engine/GraphicElement.as
+@@ -1,8 +1,4 @@
+ package flash.text.engine {
+-    import __ruffle__.stub_constructor;
+-    import __ruffle__.stub_getter;
+-    import __ruffle__.stub_setter;
+-
+     import flash.display.DisplayObject;
+     import flash.events.EventDispatcher;
+ 
+@@ -17,38 +13,15 @@ package flash.text.engine {
+             textRotation:String = "rotate0"
+         ) {
+             super(elementFormat, eventMirror, textRotation);
+-
+-            stub_constructor("flash.text.engine.GraphicElement");
+-
+-            this.init();
+-        }
+-
+-        private native function init():void;
+-
+-        public function get elementHeight():Number {
+-            stub_getter("flash.text.engine.GraphicElement", "elementHeight");
+-            return 15.0;
+-        }
+-        public function set elementHeight(value:Number):void {
+-            stub_setter("flash.text.engine.GraphicElement", "elementHeight");
++            this.init(graphic, elementWidth, elementHeight);
+         }
+ 
+-        public function get elementWidth():Number {
+-            stub_getter("flash.text.engine.GraphicElement", "elementWidth");
+-            return 15.0;
+-        }
+-
+-        public function set elementWidth(value:Number):void {
+-            stub_setter("flash.text.engine.GraphicElement", "elementWidth");
+-        }
+-
+-        public function get graphic():DisplayObject {
+-            stub_getter("flash.text.engine.GraphicElement", "graphic");
+-            return null;
+-        }
+-
+-        public function set graphic(value:DisplayObject):void {
+-            stub_setter("flash.text.engine.GraphicElement", "graphic");
+-        }
++        private native function init(graphic:DisplayObject, width:Number, height:Number):void;
++        public native function get elementHeight():Number;
++        public native function set elementHeight(value:Number):void;
++        public native function get elementWidth():Number;
++        public native function set elementWidth(value:Number):void;
++        public native function get graphic():DisplayObject;
++        public native function set graphic(value:DisplayObject):void;
+     }
+ }
+diff --git a/core/src/avm2/globals/flash/text/engine/TextLine.as b/core/src/avm2/globals/flash/text/engine/TextLine.as
+index 32e0c60..7a4854e 100644
+--- a/core/src/avm2/globals/flash/text/engine/TextLine.as
++++ b/core/src/avm2/globals/flash/text/engine/TextLine.as
+@@ -9,10 +9,6 @@ package flash.text.engine {
+     import flash.geom.Rectangle;
+     import flash.ui.ContextMenu;
+ 
+-    // FIXME: None of the DisplayObjectContainer methods actually work on
+-    // the TextLine class in Ruffle, despite the methods working fine in FP-
+-    // however, it's unlikely that SWFs will actually attempt to add children
+-    // to a TextLine.
+     [Ruffle(Abstract)]
+     [API("662")]
+     public final class TextLine extends DisplayObjectContainer {
+@@ -55,10 +51,7 @@ package flash.text.engine {
+         public native function get validity():String;
+         public native function set validity(value:String):void;
+ 
+-        public function get hasGraphicElement():Boolean {
+-            stub_getter("flash.text.engine.TextLine", "hasGraphicElement");
+-            return false;
+-        }
++        public native function get hasGraphicElement():Boolean;
+ 
+         public function get atomCount():int {
+             stub_getter("flash.text.engine.TextLine", "atomCount");
+diff --git a/core/src/avm2/globals/flash/text/engine/content_element.rs b/core/src/avm2/globals/flash/text/engine/content_element.rs
+index 3d0da55..0054b00 100644
+--- a/core/src/avm2/globals/flash/text/engine/content_element.rs
++++ b/core/src/avm2/globals/flash/text/engine/content_element.rs
+@@ -179,8 +179,15 @@ pub fn set_text_rotation<'gc>(
+ pub fn get_raw_text<'gc>(
+     activation: &mut Activation<'_, 'gc>,
+     this: Value<'gc>,
+-    args: FunctionArgs<'_, 'gc>,
++    _args: FunctionArgs<'_, 'gc>,
+ ) -> Result<Value<'gc>, Error<'gc>> {
+-    avm2_stub_getter!(activation, "flash.text.engine.ContentElement", "rawText");
+-    get_text(activation, this, args)
++    let this = this
++        .as_object()
++        .unwrap()
++        .as_content_element_object()
++        .unwrap();
++    Ok(this
++        .raw_text(activation)
++        .map(Value::from)
++        .unwrap_or(Value::Null))
+ }
+diff --git a/core/src/avm2/globals/flash/text/engine/graphic_element.rs b/core/src/avm2/globals/flash/text/engine/graphic_element.rs
+index b7270db..deb2f6e 100644
+--- a/core/src/avm2/globals/flash/text/engine/graphic_element.rs
++++ b/core/src/avm2/globals/flash/text/engine/graphic_element.rs
+@@ -1,22 +1,132 @@
+ use crate::avm2::activation::Activation;
+ use crate::avm2::error::Error;
+ use crate::avm2::function::FunctionArgs;
+-use crate::avm2::object::ElementData;
++use crate::avm2::object::{ContentElementObject, ElementData};
++use crate::avm2::parameters::ParametersExt;
+ use crate::avm2::value::Value;
++use crate::display_object::{DisplayObject, TDisplayObject, TDisplayObjectContainer};
++use swf::Twips;
++
++fn element(this: Value<'_>) -> ContentElementObject<'_> {
++    this.as_object()
++        .unwrap()
++        .as_content_element_object()
++        .unwrap()
++}
+ 
+ pub fn init<'gc>(
+     activation: &mut Activation<'_, 'gc>,
+     this: Value<'gc>,
++    args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    *element(this).element_data_mut(activation.gc()) = ElementData::Graphic {
++        graphic: args
++            .try_get_object(0)
++            .map(|o| o.as_display_object().unwrap()),
++        width: args.get_f64(1),
++        height: args.get_f64(2),
++        line: None,
++    };
++    Ok(Value::Undefined)
++}
++
++pub fn get_graphic<'gc>(
++    _activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
+     _args: FunctionArgs<'_, 'gc>,
+ ) -> Result<Value<'gc>, Error<'gc>> {
+-    let this = this
+-        .as_object()
+-        .unwrap()
+-        .as_content_element_object()
+-        .unwrap();
++    let this = element(this);
++    let ElementData::Graphic { graphic, .. } = &*this.element_data() else {
++        unreachable!()
++    };
++    Ok(graphic
++        .map(|g| g.object2().unwrap().into())
++        .unwrap_or(Value::Null))
++}
++
++pub fn set_graphic<'gc>(
++    activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
++    args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    let this = element(this);
++    let replacement = args
++        .try_get_object(0)
++        .map(|o| o.as_display_object().unwrap());
++    let (previous, binding) = {
++        let mut data = this.element_data_mut(activation.gc());
++        let ElementData::Graphic { graphic, line, .. } = &mut *data else {
++            unreachable!()
++        };
++        (std::mem::replace(graphic, replacement), *line)
++    };
++    if DisplayObject::option_ptr_eq(previous, replacement) {
++        return Ok(Value::Undefined);
++    }
++    if let Some((mut line, x, y)) = binding {
++        if let Some(previous) = previous.filter(|g| {
++            g.parent()
++                .is_some_and(|p| DisplayObject::ptr_eq(p, line.into()))
++        }) {
++            line.remove_child(activation.context, previous);
++        }
++        if let Some(graphic) = replacement {
++            graphic.set_x(Twips::from_pixels(x));
++            graphic.set_y(Twips::from_pixels(y));
++            line.insert_at_index(activation.context, graphic, line.num_children());
++        }
++    }
++    Ok(Value::Undefined)
++}
+ 
++pub fn get_element_width<'gc>(
++    _activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
++    _args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    let this = element(this);
++    let ElementData::Graphic { width, .. } = &*this.element_data() else {
++        unreachable!()
++    };
++    Ok((*width).into())
++}
++
++pub fn set_element_width<'gc>(
++    activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
++    args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    let this = element(this);
+     let mut data = this.element_data_mut(activation.gc());
+-    *data = ElementData::Graphic;
++    let ElementData::Graphic { width, .. } = &mut *data else {
++        unreachable!()
++    };
++    *width = args.get_f64(0);
++    Ok(Value::Undefined)
++}
+ 
++pub fn get_element_height<'gc>(
++    _activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
++    _args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    let this = element(this);
++    let ElementData::Graphic { height, .. } = &*this.element_data() else {
++        unreachable!()
++    };
++    Ok((*height).into())
++}
++
++pub fn set_element_height<'gc>(
++    activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
++    args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    let this = element(this);
++    let mut data = this.element_data_mut(activation.gc());
++    let ElementData::Graphic { height, .. } = &mut *data else {
++        unreachable!()
++    };
++    *height = args.get_f64(0);
+     Ok(Value::Undefined)
+ }
+diff --git a/core/src/avm2/globals/flash/text/engine/text_block.rs b/core/src/avm2/globals/flash/text/engine/text_block.rs
+index b92cf70..0059e70 100644
+--- a/core/src/avm2/globals/flash/text/engine/text_block.rs
++++ b/core/src/avm2/globals/flash/text/engine/text_block.rs
+@@ -456,7 +456,7 @@ pub fn do_create_text_line<'gc>(
+         0
+     };
+ 
+-    let spans = match get_spans_from_content(content) {
++    let (spans, graphics) = match get_spans_from_content(content) {
+         Ok(spans) => spans,
+         Err(HandleContentError::NullElementFormat) => {
+             // For some reason, FP handles this error as it handles an uncaught
+@@ -498,7 +498,7 @@ pub fn do_create_text_line<'gc>(
+     let text_line = if let Some(line) = line_to_use {
+         // `TextLine.recreateTextLine` is the caller: completely reset the
+         // properties of the passed line and use it.
+-        line.reset_properties(activation.gc());
++        line.reset_properties(activation.context);
+         line
+     } else {
+         // `TextLine.createTextLine` is the caller: create a new `TextLine`.
+@@ -510,8 +510,6 @@ pub fn do_create_text_line<'gc>(
+ 
+     let subtext = &text[previous_position..next_position];
+ 
+-    fallback.set_text(subtext, activation.context);
+-
+     apply_format(
+         activation,
+         fallback,
+@@ -521,6 +519,31 @@ pub fn do_create_text_line<'gc>(
+         line_index,
+     );
+ 
++    for (position, element) in graphics {
++        if (previous_position..next_position).contains(&position) {
++            let index = position - previous_position;
++            let bounds = fallback
++                .layout()
++                .boxes_iter()
++                .find(|b| {
++                    b.start() == index
++                        && matches!(
++                            b.content(),
++                            crate::html::LayoutContent::InlineGraphic { .. }
++                        )
++                })
++                .expect("Inline graphic missing from TextLine layout")
++                .bounds();
++            let origin = bounds.origin();
++            text_line.add_graphic(
++                activation.context,
++                element,
++                origin.x().to_pixels(),
++                origin.y().to_pixels() - text_line.metrics().0,
++            );
++        }
++    }
++
+     // FIXME: This needs to use `intrinsic_bounds` to measure the width
+     // of the provided text, and set the width of the EditText to that.
+     // Some games depend on this (e.g. Realm Grinder).
+@@ -567,21 +590,23 @@ enum HandleContentError {
+ 
+ fn get_spans_from_content<'gc>(
+     content: ContentElementObject<'gc>,
+-) -> Result<FormatSpans, HandleContentError> {
++) -> Result<(FormatSpans, Vec<(usize, ContentElementObject<'gc>)>), HandleContentError> {
+     let mut all_text = WString::new();
+     let mut all_spans = Vec::new();
++    let mut graphics = Vec::new();
+ 
+-    handle_content_element(content, &mut all_text, &mut all_spans)?;
++    handle_content_element(content, &mut all_text, &mut all_spans, &mut graphics)?;
+ 
+     let mut spans = FormatSpans::from_str_and_spans(&all_text, &all_spans);
+     spans.normalize();
+-    Ok(spans)
++    Ok((spans, graphics))
+ }
+ 
+ fn handle_content_element<'gc>(
+     content: ContentElementObject<'gc>,
+     all_text: &mut WString,
+     all_spans: &mut Vec<TextSpan>,
++    graphics: &mut Vec<(usize, ContentElementObject<'gc>)>,
+ ) -> Result<(), HandleContentError> {
+     let data = content.element_data();
+     let format = content.element_format();
+@@ -603,11 +628,16 @@ fn handle_content_element<'gc>(
+         ElementData::Group { elements } => {
+             // TODO: The docs say GroupElement's format has some effects?
+             for element in elements {
+-                handle_content_element(*element, all_text, all_spans)?;
++                handle_content_element(*element, all_text, all_spans, graphics)?;
+             }
+         }
+-        ElementData::Graphic => {
+-            // TODO
++        ElementData::Graphic { width, height, .. } => {
++            let format = format.ok_or(HandleContentError::NullElementFormat)?;
++            graphics.push((all_text.len(), content));
++            all_text.push(0xfdefu16);
++            let mut span = TextSpan::with_length_and_format(1, &format.as_text_format());
++            span.inline_graphic = Some((*width, *height, format.baseline_shift()));
++            all_spans.push(span);
+         }
+         ElementData::Invalid => {
+             unreachable!(
+@@ -651,23 +681,23 @@ fn apply_format<'gc>(
+     // TODO: Handle device font/non-device font properly
+     edit_text.set_is_device_font(activation.context, false);
+     // GroupElement children retain their formats: https://airsdk.dev/reference/actionscript/3.0/flash/text/engine/GroupElement.html
++    let mut line_spans = Vec::new();
+     for (start, end, _, span) in spans.iter_spans() {
+         let start = start.max(line_start);
+         let end = end.min(line_end);
+         if start < end {
+-            let format = span.get_text_format();
+-            if start == line_start {
+-                edit_text.set_new_text_format(format.clone());
+-            }
+-            edit_text.set_text_format(
+-                start - line_start,
+-                end - line_start,
+-                format,
+-                activation.context,
+-            );
++            let mut span = span.clone();
++            span.span_length = end - start;
++            line_spans.push(span);
+         }
+     }
+-
++    let mut content =
++        FormatSpans::from_str_and_spans(&spans.text()[line_start..line_end], &line_spans);
++    if let Some(first) = line_spans.first() {
++        content.set_default_format(first.get_text_format());
++    }
++    content.normalize();
++    edit_text.set_fte_content(content, activation.context);
+     edit_text.set_word_wrap(true, activation.context);
+ 
+     let measured_text = edit_text.measure_text(activation.context);
+diff --git a/core/src/avm2/globals/flash/text/engine/text_line.rs b/core/src/avm2/globals/flash/text/engine/text_line.rs
+index d9900ab..0ada9a5 100644
+--- a/core/src/avm2/globals/flash/text/engine/text_line.rs
++++ b/core/src/avm2/globals/flash/text/engine/text_line.rs
+@@ -223,6 +223,21 @@ pub fn get_next_line<'gc>(
+         .unwrap_or(Value::Null))
+ }
+ 
++pub fn get_has_graphic_element<'gc>(
++    _activation: &mut Activation<'_, 'gc>,
++    this: Value<'gc>,
++    _args: FunctionArgs<'_, 'gc>,
++) -> Result<Value<'gc>, Error<'gc>> {
++    let line = this
++        .as_object()
++        .unwrap()
++        .as_display_object()
++        .unwrap()
++        .as_text_line()
++        .unwrap();
++    Ok(line.has_graphic_element().into())
++}
++
+ pub fn get_text_height<'gc>(
+     activation: &mut Activation<'_, 'gc>,
+     this: Value<'gc>,
+diff --git a/core/src/avm2/object/content_element_object.rs b/core/src/avm2/object/content_element_object.rs
+index 90a5e7e..ee2a159 100644
+--- a/core/src/avm2/object/content_element_object.rs
++++ b/core/src/avm2/object/content_element_object.rs
+@@ -87,8 +87,12 @@ pub enum ElementData<'gc> {
+         elements: Vec<ContentElementObject<'gc>>,
+     },
+ 
+-    /// Such as for the `GraphicElement` class. TODO
+-    Graphic,
++    Graphic {
++        graphic: Option<crate::display_object::DisplayObject<'gc>>,
++        width: f64,
++        height: f64,
++        line: Option<(crate::display_object::TextLine<'gc>, f64, f64)>,
++    },
+ 
+     /// Such as for a user-defined class extending `ContentElement`.
+     Invalid,
+@@ -143,6 +147,18 @@ impl<'gc> ContentElementObject<'gc> {
+     }
+ 
+     pub fn text(self, activation: &mut Activation<'_, 'gc>) -> Option<AvmString<'gc>> {
++        self.text_content(activation, false)
++    }
++
++    pub fn raw_text(self, activation: &mut Activation<'_, 'gc>) -> Option<AvmString<'gc>> {
++        self.text_content(activation, true)
++    }
++
++    fn text_content(
++        self,
++        activation: &mut Activation<'_, 'gc>,
++        raw: bool,
++    ) -> Option<AvmString<'gc>> {
+         match &*self.element_data() {
+             ElementData::Text { text } => *text,
+             ElementData::Group { elements } => {
+@@ -151,7 +167,7 @@ impl<'gc> ContentElementObject<'gc> {
+                 for element in elements {
+                     // Recursively call `text` to concatenate the descendants
+                     // of the `GroupElement`
+-                    let new_text = element.text(activation);
++                    let new_text = element.text_content(activation, raw);
+ 
+                     if let Some(new_text) = new_text {
+                         if let Some(existing_text) = result {
+@@ -171,7 +187,11 @@ impl<'gc> ContentElementObject<'gc> {
+ 
+                 result
+             }
+-            ElementData::Graphic => Some(istr!("")),
++            ElementData::Graphic { .. } => Some(if raw {
++                AvmString::new_utf8(activation.gc(), "\u{fdef}")
++            } else {
++                istr!("")
++            }),
+             ElementData::Invalid => None,
+         }
+     }
+diff --git a/core/src/display_object.rs b/core/src/display_object.rs
+index a71050a..242d136 100644
+--- a/core/src/display_object.rs
++++ b/core/src/display_object.rs
+@@ -2922,6 +2922,7 @@ pub trait TDisplayObject<'gc>:
+         match self {
+             Self::Avm1Button(dobj) => Some(DisplayObjectContainer::Avm1Button(dobj)),
+             Self::LoaderDisplay(dobj) => Some(DisplayObjectContainer::LoaderDisplay(dobj)),
++            Self::TextLine(dobj) => Some(DisplayObjectContainer::TextLine(dobj)),
+             Self::MovieClip(dobj) => Some(DisplayObjectContainer::MovieClip(dobj)),
+             Self::Stage(dobj) => Some(DisplayObjectContainer::Stage(dobj)),
+             _ => None,
+diff --git a/core/src/display_object/container.rs b/core/src/display_object/container.rs
+index 61b8459..0409c40 100644
+--- a/core/src/display_object/container.rs
++++ b/core/src/display_object/container.rs
+@@ -122,6 +122,7 @@ pub fn dispatch_added_event<'gc>(
+         Avm1Button(Avm1Button<'gc>),
+         MovieClip(MovieClip<'gc>),
+         LoaderDisplay(LoaderDisplay<'gc>),
++        TextLine(crate::display_object::TextLine<'gc>),
+     }
+ )]
+ pub trait TDisplayObjectContainer<'gc>:
+@@ -613,6 +614,7 @@ impl<'gc> From<DisplayObjectContainer<'gc>> for DisplayObject<'gc> {
+             DisplayObjectContainer::Avm1Button(o) => DisplayObject::Avm1Button(o),
+             DisplayObjectContainer::MovieClip(o) => DisplayObject::MovieClip(o),
+             DisplayObjectContainer::LoaderDisplay(o) => DisplayObject::LoaderDisplay(o),
++            DisplayObjectContainer::TextLine(o) => DisplayObject::TextLine(o),
+         }
+     }
+ }
+diff --git a/core/src/display_object/edit_text.rs b/core/src/display_object/edit_text.rs
+index 5035dd1..2c26f3a 100644
+--- a/core/src/display_object/edit_text.rs
++++ b/core/src/display_object/edit_text.rs
+@@ -529,6 +529,12 @@ impl<'gc> EditText<'gc> {
+         self.relayout(context);
+     }
+ 
++    pub fn set_fte_content(self, spans: FormatSpans, context: &mut UpdateContext<'gc>) {
++        assert!(self.is_fte());
++        self.0.text_spans.replace(spans);
++        self.relayout(context);
++    }
++
+     pub fn is_editable(self) -> bool {
+         !self.contains_flag(EditTextFlag::READ_ONLY)
+     }
+@@ -2290,7 +2296,7 @@ impl<'gc> EditText<'gc> {
+                     first_format = Some(text_format);
+                     break;
+                 }
+-                LayoutContent::Drawing { .. } => {}
++                LayoutContent::Drawing { .. } | LayoutContent::InlineGraphic { .. } => {}
+             }
+         }
+ 
+diff --git a/core/src/display_object/text_line.rs b/core/src/display_object/text_line.rs
+index a6c05e8..2c3a4ed 100644
+--- a/core/src/display_object/text_line.rs
++++ b/core/src/display_object/text_line.rs
+@@ -2,9 +2,10 @@
+ 
+ use crate::avm1::Object as Avm1Object;
+ use crate::avm2::StageObject as Avm2StageObject;
+-use crate::avm2::object::TextBlockObject;
++use crate::avm2::object::{ContentElementObject, ElementData, TextBlockObject};
+ use crate::backend::ui::MouseCursor;
+ use crate::context::{RenderContext, UpdateContext};
++use crate::display_object::container::ChildContainer;
+ use crate::display_object::interactive::{InteractiveObjectBase, TInteractiveObject};
+ use crate::display_object::{
+     Avm2MousePick, BoundsMode, DisplayObjectBase, EditText, InteractiveObject,
+@@ -16,11 +17,11 @@ use crate::tag_utils::SwfMovie;
+ use crate::vminterface::Instantiator;
+ use core::fmt;
+ use gc_arena::barrier::unlock;
+-use gc_arena::lock::Lock;
++use gc_arena::lock::{Lock, RefLock};
+ use gc_arena::{Collect, Gc, Mutation};
+ use ruffle_common::utils::HasPrefixField;
+ use ruffle_render::transform::Transform;
+-use std::cell::Cell;
++use std::cell::{Cell, Ref, RefMut};
+ use std::sync::Arc;
+ use swf::Twips;
+ 
+@@ -43,6 +44,8 @@ pub struct TextLineData<'gc> {
+     base: InteractiveObjectBase<'gc>,
+     avm2_object: Lock<Option<Avm2StageObject<'gc>>>,
+     fallback: EditText<'gc>,
++    container: RefLock<ChildContainer<'gc>>,
++    graphics: RefLock<Vec<ContentElementObject<'gc>>>,
+     #[collect(require_static)]
+     movie: Arc<SwfMovie>,
+ 
+@@ -69,12 +72,14 @@ impl<'gc> TextLine<'gc> {
+         movie: Arc<SwfMovie>,
+         fallback: EditText<'gc>,
+     ) -> Self {
+-        TextLine(Gc::new(
++        let line = TextLine(Gc::new(
+             context.gc(),
+             TextLineData {
+                 base: Default::default(),
+                 avm2_object: Lock::new(None),
+                 fallback,
++                container: RefLock::new(ChildContainer::new(&movie)),
++                graphics: RefLock::new(Vec::new()),
+                 movie,
+                 validity: Lock::new(TextLineValidity::Valid),
+                 text_block: Lock::new(None),
+@@ -87,10 +92,34 @@ impl<'gc> TextLine<'gc> {
+                 previous_line: Lock::new(None),
+                 next_line: Lock::new(None),
+             },
+-        ))
++        ));
++        line.set_tab_children(context, false);
++        line
+     }
+ 
+-    pub fn reset_properties(self, mc: &Mutation<'gc>) {
++    pub fn reset_properties(mut self, context: &mut UpdateContext<'gc>) {
++        let mc = context.gc();
++        let graphics = unlock!(Gc::write(mc, self.0), TextLineData, graphics).take();
++        for element in graphics {
++            let previous = {
++                let mut data = element.element_data_mut(mc);
++                let ElementData::Graphic { graphic, line, .. } = &mut *data else {
++                    unreachable!()
++                };
++                if line.is_some_and(|(owner, _, _)| DisplayObject::ptr_eq(owner, self)) {
++                    *line = None;
++                    *graphic
++                } else {
++                    None
++                }
++            };
++            if let Some(graphic) = previous.filter(|g| {
++                g.parent()
++                    .is_some_and(|p| DisplayObject::ptr_eq(p, self.into()))
++            }) {
++                self.remove_child(context, graphic);
++            }
++        }
+         // TODO: Reset more properties
+ 
+         // Reset display object properties
+@@ -151,6 +180,36 @@ impl<'gc> TextLine<'gc> {
+         self.set_next_line(None, mc);
+     }
+ 
++    pub fn add_graphic(
++        mut self,
++        context: &mut UpdateContext<'gc>,
++        element: ContentElementObject<'gc>,
++        x: f64,
++        y: f64,
++    ) {
++        // FTE graphics are unscaled line children, not glyphs: https://airsdk.dev/reference/actionscript/3.0/flash/text/engine/GraphicElement.html
++        let graphic = {
++            let mut data = element.element_data_mut(context.gc());
++            let ElementData::Graphic { graphic, line, .. } = &mut *data else {
++                unreachable!()
++            };
++            *line = Some((self, x, y));
++            *graphic
++        };
++        unlock!(Gc::write(context.gc(), self.0), TextLineData, graphics)
++            .borrow_mut()
++            .push(element);
++        if let Some(graphic) = graphic {
++            graphic.set_x(Twips::from_pixels(x));
++            graphic.set_y(Twips::from_pixels(y));
++            self.insert_at_index(context, graphic, self.num_children());
++        }
++    }
++
++    pub fn has_graphic_element(self) -> bool {
++        !self.0.graphics.borrow().is_empty()
++    }
++
+     pub fn measure_text(self, context: &mut UpdateContext<'gc>) -> (Twips, Twips) {
+         self.0.fallback.measure_text(context)
+     }
+@@ -300,6 +359,7 @@ impl<'gc> TDisplayObject<'gc> for TextLine<'gc> {
+         });
+         self.0.fallback.render_self(context);
+         context.transform_stack.pop();
++        self.render_children(context);
+     }
+ 
+     fn self_bounds(self, mode: BoundsMode) -> Rectangle<Twips> {
+@@ -346,6 +406,15 @@ impl<'gc> TDisplayObject<'gc> for TextLine<'gc> {
+     }
+ }
+ 
++impl<'gc> TDisplayObjectContainer<'gc> for TextLine<'gc> {
++    fn raw_container(&self) -> Ref<'_, ChildContainer<'gc>> {
++        self.0.container.borrow()
++    }
++    fn raw_container_mut(&self, mc: &Mutation<'gc>) -> RefMut<'_, ChildContainer<'gc>> {
++        unlock!(Gc::write(mc, self.0), TextLineData, container).borrow_mut()
++    }
++}
++
+ impl<'gc> TInteractiveObject<'gc> for TextLine<'gc> {
+     fn raw_interactive(self) -> Gc<'gc, InteractiveObjectBase<'gc>> {
+         HasPrefixField::as_prefix_gc(self.0)
+diff --git a/core/src/html/layout.rs b/core/src/html/layout.rs
+index 0c50b8c..461945a 100644
+--- a/core/src/html/layout.rs
++++ b/core/src/html/layout.rs
+@@ -112,6 +112,24 @@ pub struct LayoutBuilder<'a, 'gc> {
+     max_bounds: Twips,
+ }
+ 
++fn embedded_font_names(name: &str, font_type: FontType) -> impl Iterator<Item = &str> {
++    let cff = font_type == FontType::EmbeddedCFF;
++    name.split(move |c| cff && c == ',')
++        .map(move |name| if cff { name.trim() } else { name })
++}
++
++#[test]
++fn cff_font_list_preserves_order_and_classic_font_names() {
++    assert_eq!(
++        embedded_font_names("BoldCFF, OtherCFF, _sans", FontType::EmbeddedCFF).collect::<Vec<_>>(),
++        ["BoldCFF", "OtherCFF", "_sans"]
++    );
++    assert_eq!(
++        embedded_font_names("BoldCFF, _sans", FontType::Embedded).collect::<Vec<_>>(),
++        ["BoldCFF, _sans"]
++    );
++}
++
+ impl<'a, 'gc> LayoutBuilder<'a, 'gc> {
+     fn new(
+         context: &'a mut dyn LayoutContext<'gc>,
+@@ -155,6 +173,29 @@ impl<'a, 'gc> LayoutBuilder<'a, 'gc> {
+         self.font_set = Some(font_set);
+         self.newspan(span);
+ 
++        if let Some((width, height, shift)) = span.inline_graphic {
++            let width = Twips::from_pixels(width);
++            let (available, offset) = self.wrap_dimensions(span);
++            if self.is_word_wrap && width + offset > available && !self.is_start_of_line() {
++                self.newline(span_start, span, false);
++                self.newspan(span);
++            }
++            let height = Twips::from_pixels(height);
++            let graphic = LayoutBox {
++                bounds: BoxBounds::from_position_and_size(
++                    self.cursor - (Twips::ZERO, height + Twips::from_pixels(shift)).into(),
++                    Size::from((width, height)),
++                ),
++                content: LayoutContent::InlineGraphic {
++                    position: span_start,
++                },
++                last_in_line: false,
++            };
++            self.cursor += (width, Twips::ZERO).into();
++            self.append_box(graphic);
++            return;
++        }
++
+         let params = EvalParameters::from_span(span);
+ 
+         for range in span_text.split_indices([b'\n', b'\r', b'\t']) {
+@@ -302,11 +343,11 @@ impl<'a, 'gc> LayoutBuilder<'a, 'gc> {
+         let mut line_size_bounds = None;
+         let mut box_count: i32 = 0;
+         for linebox in self.boxes.iter_mut() {
+-            let (text, _tf, font_set, params) =
+-                linebox.as_renderable_text(self.text).expect("text");
+-
+             // Flash ignores trailing spaces when aligning lines, so should we
+-            if self.movie.version() >= 8 && self.current_line_span.align != swf::TextAlign::Left {
++            if self.movie.version() >= 8
++                && self.current_line_span.align != swf::TextAlign::Left
++                && let Some((text, _tf, font_set, params)) = linebox.as_renderable_text(self.text)
++            {
+                 linebox.bounds = linebox
+                     .bounds
+                     .with_width(font_set.measure(text.trim_end(), params));
+@@ -350,7 +391,9 @@ impl<'a, 'gc> LayoutBuilder<'a, 'gc> {
+ 
+         box_count = 0;
+         for layout_box in self.boxes.iter_mut() {
+-            if layout_box.is_text_box() {
++            if layout_box.is_text_box()
++                || matches!(layout_box.content, LayoutContent::InlineGraphic { .. })
++            {
+                 let position = Position::from((
+                     left_adjustment + align_adjustment + (interim_adjustment * box_count),
+                     baseline_adjustment,
+@@ -490,10 +533,18 @@ impl<'a, 'gc> LayoutBuilder<'a, 'gc> {
+ 
+     /// Enter a new span.
+     fn newspan(&mut self, first_span: &TextSpan) {
+-        let font_size = Twips::from_pixels(first_span.font.size);
+-        let metrics = self.font_set.unwrap().metrics();
+-        let ascent = metrics.ascent(font_size);
+-        let descent = metrics.descent(font_size);
++        let (font_size, ascent, descent) =
++            if let Some((_, height, shift)) = first_span.inline_graphic {
++                (
++                    Twips::from_pixels(height),
++                    Twips::from_pixels((height + shift).max(0.0)),
++                    Twips::from_pixels((-shift).max(0.0)),
++                )
++            } else {
++                let size = Twips::from_pixels(first_span.font.size);
++                let metrics = self.font_set.unwrap().metrics();
++                (size, metrics.ascent(size), metrics.descent(size))
++            };
+         let leading = Twips::from_pixels(first_span.leading);
+         if self.is_start_of_line() {
+             self.current_line_span = first_span.clone();
+@@ -541,16 +592,17 @@ impl<'a, 'gc> LayoutBuilder<'a, 'gc> {
+         // Note that the SWF can still contain a DefineFont tag with no glyphs/layout info in this case (see #451).
+         // In an ideal world, device fonts would search for a matching font on the system and render it in some way.
+         if self.font_type.is_embedded()
+-            && let Some(font) = self
+-                .context
+-                .get_embedded_font_by_name(
+-                    &font_name,
+-                    self.font_type,
+-                    span.style.bold,
+-                    span.style.italic,
+-                    Some(self.movie.clone()),
+-                )
+-                .filter(|f| f.has_glyphs())
++            && let Some(font) = embedded_font_names(&font_name, self.font_type).find_map(|name| {
++                self.context
++                    .get_embedded_font_by_name(
++                        name,
++                        self.font_type,
++                        span.style.bold,
++                        span.style.italic,
++                        Some(self.movie.clone()),
++                    )
++                    .filter(|font| font.has_glyphs())
++            })
+         {
+             return FontSet::from_one_font(self.context.gc(), font);
+         }
+@@ -1137,6 +1189,10 @@ pub enum LayoutContent<'gc> {
+         params: EvalParameters,
+     },
+ 
++    InlineGraphic {
++        position: usize,
++    },
++
+     /// A layout box containing a drawing.
+     ///
+     /// The drawing will be rendered with its origin at the position of the
+@@ -1163,6 +1219,10 @@ impl Debug for LayoutContent<'_> {
+                 .debug_struct("Bullet")
+                 .field("position", position)
+                 .finish(),
++            LayoutContent::InlineGraphic { position } => f
++                .debug_struct("InlineGraphic")
++                .field("position", position)
++                .finish(),
+             LayoutContent::Drawing { position, .. } => f
+                 .debug_struct("Drawing")
+                 .field("position", position)
+@@ -1279,7 +1339,7 @@ impl<'gc> LayoutBox<'gc> {
+                 *font_set,
+                 *params,
+             )),
+-            LayoutContent::Drawing { .. } => None,
++            LayoutContent::Drawing { .. } | LayoutContent::InlineGraphic { .. } => None,
+         }
+     }
+ 
+@@ -1289,6 +1349,7 @@ impl<'gc> LayoutBox<'gc> {
+             LayoutContent::Text { .. } => None,
+             LayoutContent::Bullet { .. } => None,
+             LayoutContent::Drawing { drawing, .. } => Some(drawing),
++            LayoutContent::InlineGraphic { .. } => None,
+         }
+     }
+ 
+@@ -1308,7 +1369,9 @@ impl<'gc> LayoutBox<'gc> {
+         match &self.content {
+             LayoutContent::Text { start, .. } => *start,
+             LayoutContent::Bullet { position, .. } => *position,
+-            LayoutContent::Drawing { position, .. } => *position,
++            LayoutContent::Drawing { position, .. } | LayoutContent::InlineGraphic { position } => {
++                *position
++            }
+         }
+     }
+ 
+@@ -1317,6 +1380,7 @@ impl<'gc> LayoutBox<'gc> {
+             LayoutContent::Text { end, .. } => *end,
+             LayoutContent::Bullet { position, .. } => *position,
+             LayoutContent::Drawing { position, .. } => *position,
++            LayoutContent::InlineGraphic { position } => position + 1,
+         }
+     }
+ 
+@@ -1329,6 +1393,7 @@ impl<'gc> LayoutBox<'gc> {
+             LayoutContent::Text { char_end_pos, .. } => {
+                 char_end_pos.last().copied().unwrap_or_default()
+             }
++            LayoutContent::InlineGraphic { .. } => self.bounds.width(),
+             _ => Twips::ZERO,
+         }
+     }
+@@ -1336,6 +1401,10 @@ impl<'gc> LayoutBox<'gc> {
+     /// Return x-axis char bounds of the given char relative to the whole layout.
+     pub fn char_x_bounds(&self, position: usize) -> Option<(Twips, Twips)> {
+         let relative_position = position.checked_sub(self.start())?;
++        if matches!(self.content, LayoutContent::InlineGraphic { .. }) {
++            let x = self.bounds.origin().x();
++            return (relative_position == 0).then_some((x, x + self.bounds.width()));
++        }
+ 
+         let LayoutContent::Text { char_end_pos, .. } = &self.content else {
+             return None;
+diff --git a/core/src/html/text_format.rs b/core/src/html/text_format.rs
+index f3949b7..e0e13fb 100644
+--- a/core/src/html/text_format.rs
++++ b/core/src/html/text_format.rs
+@@ -425,6 +425,7 @@ pub struct TextSpan {
+     pub target: WString,
+     pub display: TextDisplay,
+     pub image: Option<Box<TextSpanImage>>,
++    pub inline_graphic: Option<(f64, f64, f64)>,
+ }
+ 
+ #[derive(Clone, Debug, PartialEq)]
+@@ -448,6 +449,7 @@ impl Default for TextSpan {
+         Self {
+             span_length: 0,
+             image: None,
++            inline_graphic: None,
+             font: TextSpanFont::default(),
+             style: TextSpanStyle::default(),
+             align: swf::TextAlign::Left,
+@@ -534,7 +536,9 @@ impl TextSpan {
+     /// It is assumed that the two text spans being considered are adjacent;
+     /// and we have no way of checking, so this function doesn't check that.
+     fn can_merge(&self, rhs: &Self) -> bool {
+-        self.font == rhs.font
++        self.inline_graphic.is_none()
++            && rhs.inline_graphic.is_none()
++            && self.font == rhs.font
+             && self.style == rhs.style
+             && self.align == rhs.align
+             && self.left_margin == rhs.left_margin
+diff --git a/tests/tests/swfs/avm2/textline_atom_index_at_char_index/output.ruffle.txt b/tests/tests/swfs/avm2/textline_atom_index_at_char_index/output.ruffle.txt
+index cbf0f05..afe3199 100644
+--- a/tests/tests/swfs/avm2/textline_atom_index_at_char_index/output.ruffle.txt
++++ b/tests/tests/swfs/avm2/textline_atom_index_at_char_index/output.ruffle.txt
+@@ -36,5 +36,5 @@ graphic element
+     getAtomIndexAtCharIndex(1)=1
+     getAtomIndexAtCharIndex(2)=2
+     getAtomIndexAtCharIndex(3)=3
+-    getAtomIndexAtCharIndex(4)=-1
++    getAtomIndexAtCharIndex(4)=4
+     getAtomIndexAtCharIndex(5)=-1
