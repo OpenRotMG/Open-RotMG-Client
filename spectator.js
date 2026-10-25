@@ -62,7 +62,10 @@
       autoplay: 'on', unmuteOverlay: 'hidden', preferredRenderer: 'wgpu-webgl',
       logLevel: 'warn', openUrlMode: 'deny', allowScriptAccess: false,
       socketProxy: [{host: '127.0.0.1', port: 2050, proxyUrl: socket.href}],
-      urlRewriteRules: [[/^https?:\/\/realmofthemadgod\.appspot\.com\/sfx\//, new URL('/sfx/', location.href).href]]
+      urlRewriteRules: [
+        [/^https?:\/\/realmofthemadgod\.appspot\.com\/sfx\//, new URL('/sfx/', location.href).href],
+        [/^https?:\/\/realmofthemadgod\.appspot\.com\/music\//, new URL('/sfx/music/', location.href).href]
+      ]
     });
     player.ruffle().traceObserver = message => {
       const status = /^openrotmg-spectator:([a-z]+):(.*)$/s.exec(message);

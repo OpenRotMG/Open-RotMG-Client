@@ -29,8 +29,9 @@ test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 
   assert.equal(options.socketProxy[0].proxyUrl, 'wss://game.example/api/bots/Triceps/socket');
   assert.equal(options.openUrlMode, 'deny');
   assert.equal(options.allowScriptAccess, false);
-  assert.equal(options.urlRewriteRules.length, 1);
+  assert.equal(options.urlRewriteRules.length, 2);
   assert.equal(options.urlRewriteRules[0][1], 'https://game.example/sfx/');
+  assert.equal(options.urlRewriteRules[1][1], 'https://game.example/sfx/music/');
   assert.equal(messages[0].type, 'openrotmg-bot-view');
   assert.equal(messages[0].bot, 'Triceps');
   const html = await readFile(new URL('../spectator.html', import.meta.url), 'utf8');

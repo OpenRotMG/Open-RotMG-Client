@@ -80,6 +80,22 @@ class SpectatorBuildTests(unittest.TestCase):
             self.assertNotIn('pushstring          "mouseMove"', web)
             self.assertNotIn('pushstring          "mouseOver"', web)
             net = (abc / 'com/company/assembleegameclient/net/_-1f.class.asasm').read_text()
+            tick_start = net.index('  trait method ' + spectator.private('_-02H', spectator.NET + ':_-1f#0'))
+            tick = net[tick_start:net.index('  end ; trait', tick_start)]
+            self.assertIn('"tickTime_"', tick)
+            self.assertIn('"tickId_"', tick)
+            self.assertIn('openrotmg-spectator:tick:', tick)
+            notification_start = net.index('  trait method ' + spectator.private('_-Lx', spectator.NET + ':_-1f#0'))
+            notification = net[notification_start:net.index('  end ; trait', notification_start)]
+            self.assertNotIn('openrotmg-spectator:tick:', notification)
+            game = (abc / 'com/company/assembleegameclient/game/GameSprite.class.asasm').read_text()
+            self.assertNotIn('getproperty         ' + spectator.q('credits_'), game)
+            nearby = (abc / '_-Rv/_-QV.class.asasm').read_text()
+            draw_start = nearby.index('  trait method ' + spectator.q('draw'))
+            draw = nearby[draw_start:nearby.index('  end ; trait', draw_start)]
+            self.assertNotIn('callpropvoid', draw)
+            self.assertNotIn('callproperty', draw)
+            self.assertNotIn('constructprop', draw)
             start = net.index('  trait method ' + spectator.private('_-ux', spectator.NET + ':_-1f#0'))
             hello = net[start:net.index('  end ; trait', start)]
             self.assertNotIn('"Account"', hello)

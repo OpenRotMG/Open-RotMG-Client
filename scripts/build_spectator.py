@@ -251,19 +251,6 @@ def transform(root):
     getlocal0
     getproperty {q('_-V1')}
     callpropvoid {q('initialize')}, 0
-    getlocal0
-    findpropstrict {q('_-0Bv', 'com.company.assembleegameclient.ui')}
-    getlocal0
-    constructprop {q('_-0Bv', 'com.company.assembleegameclient.ui')}, 1
-    setproperty {q('_-Ht')}
-    getlocal0
-    getproperty {q('_-Ht')}
-    pushshort 594
-    setproperty {q('x')}
-    getlocal0
-    getlocal0
-    getproperty {q('_-Ht')}
-    callpropvoid {q('addChild')}, 1
     returnvoid''')
     # Public spectator scenes never need account/guild badges or the inactivity controller.
     replace_method(game, 'onAddedToStage', f'''getlocal0
@@ -338,13 +325,6 @@ def transform(root):
     getlocal2
     callpropvoid {q('draw')}, 2
     getlocal0
-    getproperty {q('_-Ht')}
-    getlocal 4
-    getproperty {q('credits_')}
-    getlocal 4
-    getproperty {q('_-Q7')}
-    callpropvoid {q('draw')}, 2
-    getlocal0
     getproperty {q('_-V1')}
     callpropvoid {q('draw')}, 0
     getlocal2
@@ -362,7 +342,7 @@ def transform(root):
     getlocal2
     setproperty {q('lastUpdate_')}
     returnvoid''')
-    replace_method(network, '_-Lx', status('tick'), suffix=True)
+    replace_method(network, '_-02H', status('tick'), suffix=True)
     replace_method(network, '_-of', f'getlocal0\npushscope\n{status("disconnected")}\nreturnvoid')
     replace_method(network, 'onError', f'getlocal0\npushscope\n{status("error", "Native socket error")}\nreturnvoid')
     replace_method(network, '_-nc', f'''getlocal0
@@ -375,6 +355,8 @@ def transform(root):
     callpropvoid {q('trace')}, 1
     returnvoid''')
     replace_method(root / 'com/company/assembleegameclient/game/_-07a.class.asasm', 'onAddedToStage', 'getlocal0\npushscope\nreturnvoid')
+    # Nearby action panels otherwise create account/shop requests and fabricate empty redacted containers.
+    replace_method(root / '_-Rv/_-QV.class.asasm', 'draw', 'getlocal0\npushscope\nreturnvoid')
 
     # Only initialization and transport acknowledgements may reach the socket.
     allowed = [17, 45, 16, 22, 14, 11]
