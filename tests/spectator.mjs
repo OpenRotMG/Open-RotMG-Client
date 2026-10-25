@@ -62,6 +62,14 @@ test('live requires completed native drawing AND ticks, stale requires both to r
   assert.equal(view.messages.at(-1).status, 'live');
 });
 
+test('steady native rendering sends live heartbeats without inventing state changes', async () => {
+  const view = await launch();
+  view.native('tick');view.native('frame');
+  for (let i=0;i<16;i++) {view.native('tick');view.native('frame');view.advance(1000);}
+  assert.ok(view.messages.filter(m=>m.status==='live').length>=4);
+  assert.equal(view.messages.at(-1).status,'live');
+});
+
 test('missing assets, SWF failure, socket error, runtime error and no draw fail observably', async () => {
   for (const options of [{ruffle: false}, {loadError: 'SWF unavailable'}]) {
     const view = await launch(options);

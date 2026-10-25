@@ -42,7 +42,14 @@
     else if (status === 'error') fail(new Error(error || 'Native client failed'));
     else fail(new Error(`Unknown native spectator status: ${status}`));
   };
-  const interval = window.setInterval(refresh, 1000);
+  let lastHeartbeat = performance.now();
+  const interval = window.setInterval(() => {
+    refresh();
+    if (performance.now() - lastHeartbeat >= 5000 && state) {
+      window.parent.postMessage({type: 'openrotmg-bot-view', bot, status: state, ...(failure ? {error: failure} : {})}, '*');
+      lastHeartbeat = performance.now();
+    }
+  }, 1000);
   window.addEventListener('pagehide', () => window.clearInterval(interval), {once: true});
   try {
     if (!window.RufflePlayer) throw new Error('Ruffle assets unavailable');
