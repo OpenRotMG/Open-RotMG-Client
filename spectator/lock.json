@@ -1,0 +1,15 @@
+{
+  "source": "client.swf",
+  "version": "123.5.1",
+  "sourceRepository": "https://github.com/OpenRotMG/Open-RotMG-Client",
+  "sourceCommit": "953a374",
+  "sourceSha256": "07ae4fc3ca021a5bf08bbf94f057f7620be18b85e01abd763b3a198382e8fa48",
+  "artifact": "spectator.swf",
+  "outputSha256": "5afa2a9eb00045d8bfe65c867faad4fe9aa307ed54763013bcde136f877401fa",
+  "outputBytes": 2103364,
+  "assemblerRepository": "https://github.com/CyberShadow/RABCDAsm",
+  "assemblerCommit": "8ed623a3225ec9947f75f50bc78f5d2412a0802d",
+  "assemblerPatch": "rabcdasm-determinism.patch",
+  "patchedAsprogramSha256": "2c94a11e3fcd82a1e2aa7dc269efdfa62af0dbc212e529e62c1a968f874b720e",
+  "rabcasmSha256": "b38e1e54dc69b663d72ea1b77077974360b9ab9f419500ee08829acad5dbade8"
+}

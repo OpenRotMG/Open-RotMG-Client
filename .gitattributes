@@ -1,2 +1,3 @@
 # Unified-diff context markers must survive unchanged.
 ruffle/patches/*.patch -whitespace
+spectator/*.patch -whitespace
