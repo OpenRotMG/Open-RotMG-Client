@@ -1,0 +1,163 @@
+diff --git a/core/src/avm2/globals/flash/text/engine/graphic_element.rs b/core/src/avm2/globals/flash/text/engine/graphic_element.rs
+index deb2f6e..2baaf03 100644
+--- a/core/src/avm2/globals/flash/text/engine/graphic_element.rs
++++ b/core/src/avm2/globals/flash/text/engine/graphic_element.rs
+@@ -5,7 +5,6 @@ use crate::avm2::object::{ContentElementObject, ElementData};
+ use crate::avm2::parameters::ParametersExt;
+ use crate::avm2::value::Value;
+ use crate::display_object::{DisplayObject, TDisplayObject, TDisplayObjectContainer};
+-use swf::Twips;
+ 
+ fn element(this: Value<'_>) -> ContentElementObject<'_> {
+     this.as_object()
+@@ -25,7 +24,7 @@ pub fn init<'gc>(
+             .map(|o| o.as_display_object().unwrap()),
+         width: args.get_f64(1),
+         height: args.get_f64(2),
+-        line: None,
++        holder: None,
+     };
+     Ok(Value::Undefined)
+ }
+@@ -55,25 +54,26 @@ pub fn set_graphic<'gc>(
+         .map(|o| o.as_display_object().unwrap());
+     let (previous, binding) = {
+         let mut data = this.element_data_mut(activation.gc());
+-        let ElementData::Graphic { graphic, line, .. } = &mut *data else {
++        let ElementData::Graphic {
++            graphic, holder, ..
++        } = &mut *data
++        else {
+             unreachable!()
+         };
+-        (std::mem::replace(graphic, replacement), *line)
++        (std::mem::replace(graphic, replacement), *holder)
+     };
+     if DisplayObject::option_ptr_eq(previous, replacement) {
+         return Ok(Value::Undefined);
+     }
+-    if let Some((mut line, x, y)) = binding {
++    if let Some(mut holder) = binding {
+         if let Some(previous) = previous.filter(|g| {
+             g.parent()
+-                .is_some_and(|p| DisplayObject::ptr_eq(p, line.into()))
++                .is_some_and(|p| DisplayObject::ptr_eq(p, holder.into()))
+         }) {
+-            line.remove_child(activation.context, previous);
++            holder.remove_child(activation.context, previous);
+         }
+         if let Some(graphic) = replacement {
+-            graphic.set_x(Twips::from_pixels(x));
+-            graphic.set_y(Twips::from_pixels(y));
+-            line.insert_at_index(activation.context, graphic, line.num_children());
++            holder.insert_at_index(activation.context, graphic, holder.num_children());
+         }
+     }
+     Ok(Value::Undefined)
+diff --git a/core/src/avm2/object/content_element_object.rs b/core/src/avm2/object/content_element_object.rs
+index ee2a159..c5c589e 100644
+--- a/core/src/avm2/object/content_element_object.rs
++++ b/core/src/avm2/object/content_element_object.rs
+@@ -91,7 +91,7 @@ pub enum ElementData<'gc> {
+         graphic: Option<crate::display_object::DisplayObject<'gc>>,
+         width: f64,
+         height: f64,
+-        line: Option<(crate::display_object::TextLine<'gc>, f64, f64)>,
++        holder: Option<crate::display_object::MovieClip<'gc>>,
+     },
+ 
+     /// Such as for a user-defined class extending `ContentElement`.
+diff --git a/core/src/display_object/text_line.rs b/core/src/display_object/text_line.rs
+index 2c3a4ed..0622e29 100644
+--- a/core/src/display_object/text_line.rs
++++ b/core/src/display_object/text_line.rs
+@@ -8,7 +8,7 @@ use crate::context::{RenderContext, UpdateContext};
+ use crate::display_object::container::ChildContainer;
+ use crate::display_object::interactive::{InteractiveObjectBase, TInteractiveObject};
+ use crate::display_object::{
+-    Avm2MousePick, BoundsMode, DisplayObjectBase, EditText, InteractiveObject,
++    Avm2MousePick, BoundsMode, DisplayObjectBase, EditText, InteractiveObject, MovieClip,
+ };
+ use crate::events::{ClipEvent, ClipEventResult};
+ use crate::fte::TextLineValidity;
+@@ -101,23 +101,15 @@ impl<'gc> TextLine<'gc> {
+         let mc = context.gc();
+         let graphics = unlock!(Gc::write(mc, self.0), TextLineData, graphics).take();
+         for element in graphics {
+-            let previous = {
+-                let mut data = element.element_data_mut(mc);
+-                let ElementData::Graphic { graphic, line, .. } = &mut *data else {
+-                    unreachable!()
+-                };
+-                if line.is_some_and(|(owner, _, _)| DisplayObject::ptr_eq(owner, self)) {
+-                    *line = None;
+-                    *graphic
+-                } else {
+-                    None
+-                }
++            let holder = match &*element.element_data() {
++                ElementData::Graphic { holder, .. } => *holder,
++                _ => unreachable!(),
+             };
+-            if let Some(graphic) = previous.filter(|g| {
++            if let Some(holder) = holder.filter(|g| {
+                 g.parent()
+                     .is_some_and(|p| DisplayObject::ptr_eq(p, self.into()))
+             }) {
+-                self.remove_child(context, graphic);
++                self.remove_child(context, holder.into());
+             }
+         }
+         // TODO: Reset more properties
+@@ -187,23 +179,38 @@ impl<'gc> TextLine<'gc> {
+         x: f64,
+         y: f64,
+     ) {
+-        // FTE graphics are unscaled line children, not glyphs: https://airsdk.dev/reference/actionscript/3.0/flash/text/engine/GraphicElement.html
+-        let graphic = {
+-            let mut data = element.element_data_mut(context.gc());
+-            let ElementData::Graphic { graphic, line, .. } = &mut *data else {
+-                unreachable!()
+-            };
+-            *line = Some((self, x, y));
+-            *graphic
++        let (graphic, existing) = match &*element.element_data() {
++            ElementData::Graphic {
++                graphic, holder, ..
++            } => (*graphic, *holder),
++            _ => unreachable!(),
+         };
++        // Flash uses a Sprite holder so layout preserves authored graphic transforms: https://airsdk.dev/reference/actionscript/3.0/flash/text/engine/GraphicElement.html
++        let mut holder = existing.unwrap_or_else(|| {
++            let holder = MovieClip::new(self.movie(), context.gc());
++            let class = context.avm2.classes().sprite;
++            crate::avm2::globals::flash::display::display_object::initialize_for_allocator(
++                context,
++                holder.into(),
++                class,
++            );
++            holder
++        });
++        if let ElementData::Graphic {
++            holder: binding, ..
++        } = &mut *element.element_data_mut(context.gc())
++        {
++            *binding = Some(holder);
++        }
++        holder.set_x(Twips::from_pixels(x));
++        holder.set_y(Twips::from_pixels(y));
++        if let Some(graphic) = graphic {
++            holder.insert_at_index(context, graphic, holder.num_children());
++        }
++        self.insert_at_index(context, holder.into(), self.num_children());
+         unlock!(Gc::write(context.gc(), self.0), TextLineData, graphics)
+             .borrow_mut()
+             .push(element);
+-        if let Some(graphic) = graphic {
+-            graphic.set_x(Twips::from_pixels(x));
+-            graphic.set_y(Twips::from_pixels(y));
+-            self.insert_at_index(context, graphic, self.num_children());
+-        }
+     }
+ 
+     pub fn has_graphic_element(self) -> bool {
