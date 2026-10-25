@@ -1,11 +1,11 @@
 {
-  "version": "0.7.1-openrotmg.15",
+  "version": "0.7.1-openrotmg.16",
   "sourceCommit": "89a7049965f3090e706265670df309a5128233ac",
   "sourceSha256": "246d02cc1211e4f2cfae8b34e672f49679738eaffd5a72999f4828d925668d9a",
   "rustVersion": "1.99.0",
   "wasmBindgenVersion": "0.2.127",
-  "buildDate": "2026-10-24T00:00:00.000Z",
-  "bundleSha256": "25a35b602855671a8ae91640b17313ee793e85d15b785d7989b3140392ca0d41",
+  "buildDate": "2026-10-25T00:00:00.000Z",
+  "bundleSha256": "579236cd5a97edd3ee82c82e7e6c96976178bdc8941bfb2a64b6693f05160435",
   "patches": [
     "0001-alpha-mask.patch",
     "0002-disposed-bitmap-fill.patch",
@@ -21,6 +21,7 @@
     "0012-independent-advancement.patch",
     "0013-caret-scroll.patch",
     "0014-textline-formats.patch",
-    "0015-inline-chat-graphics.patch"
+    "0015-inline-chat-graphics.patch",
+    "0016-graphic-transform-holders.patch"
   ]
 }
