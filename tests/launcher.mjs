@@ -17,6 +17,7 @@ for (const [page, mode, movie] of [['index.html', 'game', '/client.swf'], ['draw
     await vm.runInNewContext(script, {window: {addEventListener() {}, RufflePlayer: {newest: () => ({createPlayer: () => player})}},
       document: {querySelector: key => nodes[key]}, URL, location: {href: `http://127.0.0.1:18923/${page}?url=https://evil.example/a.swf`}});
     assert.equal(options.url, movie);
+    assert.equal(options.contextMenu, mode === 'game' ? 'off' : 'on');
     assert.equal(options.allowScriptAccess, false);
     assert.equal(options.openUrlMode, 'deny');
     assert.equal(options.socketProxy[0].proxyUrl, 'ws://127.0.0.1:18923/game');
