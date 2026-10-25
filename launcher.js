@@ -23,6 +23,8 @@
   if (!Object.hasOwn(movies, mode)) throw new Error(`Unknown client mode: ${mode}`);
   await player.ruffle().load({
     url: movies[mode],
+    // Game input should not open emulator controls: https://github.com/ruffle-rs/ruffle/blob/89a7049965f3090e706265670df309a5128233ac/web/packages/core/src/public/config/load-options.ts#L160-L176
+    contextMenu:mode === 'game' ? 'off' : 'on',
     autoplay:'on',unmuteOverlay:'hidden',preferredRenderer:'wgpu-webgl',
     logLevel:'info',openUrlMode:'deny',allowScriptAccess:false,
     socketProxy:[{host:'127.0.0.1',port:2050,proxyUrl:socketEndpoint.href}],
