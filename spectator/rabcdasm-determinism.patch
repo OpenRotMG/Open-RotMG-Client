@@ -1,0 +1,36 @@
+diff --git a/asprogram.d b/asprogram.d
+index 48947f5..bf9ce10 100644
+--- a/asprogram.d
++++ b/asprogram.d
+@@ -819,7 +819,10 @@ private final class AStoABC : ASVisitor
+ 
+ 		T[] getPreliminaryValues()
+ 		{
+-			return cast(T[])pool.keys;
++			auto ordered = new T[pool.length];
++			foreach (ref entry; pool)
++				ordered[entry.addIndex] = entry.value;
++			return ordered;
+ 		}
+ 
+ 		enum { NullOffset = haveNull ? 1 : 0 }
+@@ -840,10 +843,7 @@ private final class AStoABC : ASVisitor
+ 				static bool sortPred(Entry* a, Entry* b) { return a.hits > b.hits || (a.hits == b.hits && repr(a.value) < repr(b.value)); }
+ 			}
+ 			else
+-			static if (byRef)
+ 				enum sortPred = q{a.hits > b.hits || (a.hits == b.hits && a.addIndex < b.addIndex)};
+-			else
+-				enum sortPred = q{a.hits > b.hits || (a.hits == b.hits && a.value < b.value)};
+ 			all.sort!sortPred();
+ 
+ 			// topographical sort
+@@ -853,7 +853,7 @@ private final class AStoABC : ASVisitor
+ 			foreach (uint j, e; all)
+ 				e.index = j;
+ 
+-			foreach (ref a; pool)
++			foreach (a; all)
+ 				foreach (parent; a.parents)
+ 				{
+ 					auto pb = parent in pool;
