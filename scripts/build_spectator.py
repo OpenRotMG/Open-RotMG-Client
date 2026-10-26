@@ -32,7 +32,9 @@ def private(name, owner):
 
 
 def instructions(code):
-    return ''.join('      ' + line.strip() + '\n' for line in code.strip().splitlines() if line.strip())
+    # AVM2 backward branches require an encoded label opcode, not just an assembler label.
+    lines = (line.strip() for line in code.strip().splitlines() if line.strip())
+    return ''.join('      ' + line + ('\n      label' if re.fullmatch(r'\w+:', line) else '') + '\n' for line in lines)
 
 
 def replace_method(path, name, code, prefix=False, suffix=False, constructor=False):
@@ -46,9 +48,10 @@ def replace_method(path, name, code, prefix=False, suffix=False, constructor=Fal
     if prefix:
         body = body.replace('     code\n', '     code\n' + instructions(code), 1)
     elif suffix:
-        position = body.rfind('      returnvoid')
-        if position < 0:
+        returns = list(re.finditer(r'(?m)^ +returnvoid', body))
+        if not returns:
             raise RuntimeError(f'Expected returnvoid in {path}:{name}')
+        position = returns[-1].start()
         body = body[:position] + instructions(code) + body[position:]
     else:
         body = re.sub(r'(?ms)( {4,5}code\n).*?( {4,5}end ; code)', lambda m: m[1] + instructions(code) + m[2], body, count=1)
@@ -57,17 +60,18 @@ def replace_method(path, name, code, prefix=False, suffix=False, constructor=Fal
     path.write_text(text[:match.start()] + body + text[match.end():])
 
 
-def add_method(path, name, params, code, locals_=2):
+def add_method(path, name, params, code, locals_=2, returns=None):
     text = path.read_text()
+    scope = int(re.search(r'initscopedepth (\d+)', text)[1])
     body = f'''  trait method {q(name)}
    method
-    refid "spectator/{name}"
-{''.join('    param ' + p + chr(10) for p in params)}    returns {q('void')}
+    refid "spectator/{path.stem}/{name}"
+{''.join('    param ' + p + chr(10) for p in params)}    returns {returns or q('void')}
     body
      maxstack 24
      localcount {locals_}
-     initscopedepth 9
-     maxscopedepth 10
+     initscopedepth {scope}
+     maxscopedepth {scope + 1}
      code
 {instructions(code)}     end ; code
     end ; body
@@ -158,6 +162,9 @@ def transform(root):
     callpropvoid {q('addEventListener')}, 2
     getlocal0
     getlocal2
+    setproperty {q('spectatorGame')}
+    getlocal0
+    getlocal2
     callpropvoid {q('addChild')}, 1
     returnvoid''', locals_=3)
 
@@ -179,6 +186,14 @@ def transform(root):
     replace_method(web, 'setup', capture, prefix=True)
     add_method(web, 'spectatorBlockInput', [q('Event', 'flash.events')], f'''getlocal0
     pushscope
+    getlocal0
+    getproperty {q('spectatorGame')}
+    iffalse blocked
+    getlocal0
+    getproperty {q('spectatorGame')}
+    getlocal1
+    callpropvoid {q('spectatorInput')}, 1
+    blocked:
     getlocal1
     callpropvoid {q('preventDefault')}, 0
     getlocal1
@@ -312,6 +327,9 @@ def transform(root):
     getproperty {q('map_')}
     getproperty {q('player_')}
     setlocal 4
+    getlocal0
+    getlocal 4
+    callpropvoid {q('spectatorBind')}, 1
     getlocal 4
     iffalse done
     getlocal0
@@ -337,6 +355,12 @@ def transform(root):
     getlocal2
     setproperty {q('spectatorFrameTime')}
     {status('frame')}
+    findpropstrict {q('trace')}
+    pushstring "openrotmg-spectator:source:"
+    getlocal0
+    getproperty {q('spectatorSource')}
+    add
+    callpropvoid {q('trace')}, 1
     done:
     getlocal0
     getlocal2
@@ -355,8 +379,7 @@ def transform(root):
     callpropvoid {q('trace')}, 1
     returnvoid''')
     replace_method(root / 'com/company/assembleegameclient/game/_-07a.class.asasm', 'onAddedToStage', 'getlocal0\npushscope\nreturnvoid')
-    # Nearby action panels otherwise create account/shop requests and fabricate empty redacted containers.
-    replace_method(root / '_-Rv/_-QV.class.asasm', 'draw', 'getlocal0\npushscope\nreturnvoid')
+    spectator_interactions(root)
 
     # Only initialization and transport acknowledgements may reach the socket.
     allowed = [17, 45, 16, 22, 14, 11]
@@ -424,6 +447,577 @@ def transform(root):
     ifne authoritative
     returnvoid
     authoritative:''', prefix=True)
+
+
+def spectator_interactions(root):
+    ui = 'com.company.assembleegameclient.ui'
+    player_type = q('Player', OBJECTS)
+    mouse = q('MouseEvent', 'flash.events')
+    index = 'MultinameL([PackageNamespace("")])'
+    game = root / 'com/company/assembleegameclient/game/GameSprite.class.asasm'
+    minimap = root / 'com/company/assembleegameclient/ui/_-ej.class.asasm'
+    chat = root / 'com/company/assembleegameclient/ui/_-4D.class.asasm'
+
+    def slot(path, name, type_, value):
+        text = path.read_text()
+        path.write_text(text.replace(' end ; instance',
+            f'  trait slot {q(name)} type {type_} value {value} end\n end ; instance'))
+
+    def splice(path, anchor, code, replace=False):
+        text = path.read_text()
+        if text.count(anchor) != 1:
+            raise RuntimeError(f'Expected one interaction anchor in {path}: {anchor}')
+        path.write_text(text.replace(anchor, ('' if replace else anchor + '\n') + instructions(code)))
+
+    slot(root / 'WebMain.class.asasm', 'spectatorGame', q('GameSprite', GAME), 'Null()')
+    slot(game, 'spectatorSource', q('int'), 'Integer(-1)')
+    add_method(game, 'spectatorBind', [player_type], f'''getlocal0
+    pushscope
+    pushbyte -1
+    setlocal2
+    getlocal1
+    iffalse compare
+    getlocal1
+    getproperty {q('objectId_')}
+    setlocal2
+    compare:
+    getlocal2
+    getlocal0
+    getproperty {q('spectatorSource')}
+    ifeq done
+    getlocal0
+    getlocal2
+    setproperty {q('spectatorSource')}
+    findpropstrict {q('trace')}
+    pushstring "openrotmg-spectator:source:"
+    getlocal2
+    add
+    callpropvoid {q('trace')}, 1
+    done:
+    returnvoid''', locals_=3)
+    add_method(game, 'spectatorInspect', [player_type, mouse], f'''getlocal0
+    pushscope
+    getlocal1
+    iffalse done
+    getlocal0
+    getproperty {q('map_')}
+    setlocal3
+    getlocal3
+    getproperty {q('player_')}
+    iffalse done
+    getlocal1
+    getproperty {q('map_')}
+    getlocal3
+    ifne done
+    getlocal3
+    getproperty {q('goDict_')}
+    getlocal1
+    getproperty {q('objectId_')}
+    getproperty {index}
+    getlocal1
+    ifne done
+    getlocal0
+    getlocal3
+    getproperty {q('player_')}
+    callpropvoid {q('spectatorBind')}, 1
+    findpropstrict {q('trace')}
+    pushstring "openrotmg-spectator:inspect:"
+    getlocal0
+    getproperty {q('spectatorSource')}
+    add
+    pushstring ":"
+    add
+    getlocal1
+    getproperty {q('objectId_')}
+    add
+    pushstring ":"
+    add
+    getlocal2
+    getproperty {q('stageX')}
+    add
+    pushstring ":"
+    add
+    getlocal2
+    getproperty {q('stageY')}
+    add
+    callpropvoid {q('trace')}, 1
+    done:
+    returnvoid''', locals_=4)
+
+    # Capture stays closed: dispatch only native public-player inspection and minimap zoom.
+    add_method(game, 'spectatorInput', [q('Event', 'flash.events')], f'''getlocal0
+    pushscope
+    getlocal1
+    astype {mouse}
+    setlocal2
+    getlocal2
+    iffalse done
+    getlocal0
+    getproperty {q('map_')}
+    getproperty {q('player_')}
+    iffalse done
+    getlocal2
+    getproperty {q('type')}
+    pushstring "mouseDown"
+    ifne targets
+    getlocal0
+    getproperty {q('textBox_')}
+    getlocal2
+    callproperty {q('spectatorPlayer')}, 1
+    setlocal 4
+    getlocal 4
+    iffalse targets
+    getlocal0
+    getlocal 4
+    getlocal2
+    callpropvoid {q('spectatorInspect')}, 2
+    returnvoid
+    targets:
+    getlocal2
+    getproperty {q('target')}
+    astype {q('DisplayObject', 'flash.display')}
+    setlocal3
+    ancestors:
+    getlocal3
+    iffalse world
+    getlocal3
+    istype {q('_-ej', ui)}
+    iffalse nearby
+    getlocal3
+    getlocal2
+    callpropvoid {q('spectatorInput')}, 1
+    returnvoid
+    nearby:
+    getlocal2
+    getproperty {q('type')}
+    pushstring "mouseDown"
+    ifne next
+    getlocal3
+    istype {q('_-gV', ui)}
+    iffalse next
+    getlocal3
+    getproperty {q('parent')}
+    istype {q('_-w6', '_-Rv')}
+    iftrue inspectRow
+    getlocal3
+    getproperty {q('parent')}
+    istype {q('_-06M', '_-0DB')}
+    iffalse next
+    getlocal3
+    getproperty {q('parent')}
+    setlocal 4
+    getlocal 4
+    getproperty {q('parent')}
+    getlocal 4
+    callpropvoid {q('removeChild')}, 1
+    inspectRow:
+    getlocal0
+    getlocal3
+    getproperty {q('go_')}
+    astype {player_type}
+    getlocal2
+    callpropvoid {q('spectatorInspect')}, 2
+    returnvoid
+    next:
+    getlocal3
+    getproperty {q('parent')}
+    setlocal3
+    jump ancestors
+    world:
+    getlocal2
+    getproperty {q('type')}
+    pushstring "mouseDown"
+    ifne done
+    getlocal0
+    getproperty {q('map_')}
+    getlocal2
+    getproperty {q('target')}
+    astype {q('DisplayObject', 'flash.display')}
+    callproperty {q('contains')}, 1
+    iffalse done
+    getlocal0
+    getlocal0
+    getproperty {q('map_')}
+    callproperty {q('spectatorPlayer')}, 0
+    getlocal2
+    callpropvoid {q('spectatorInspect')}, 2
+    done:
+    returnvoid''', locals_=5)
+
+    # The rendered quad and draw order are authoritative, not inferred world-distance circles.
+    world = root / 'com/company/assembleegameclient/map/_-Xl.class.asasm'
+    code = f'''getlocal0
+    pushscope
+    getlocal0
+    getproperty {q('_-u2')}
+    getproperty {q('length')}
+    setlocal1
+    loop:
+    declocal_i 1
+    getlocal1
+    pushbyte 0
+    iflt missing
+    getlocal0
+    getproperty {q('_-u2')}
+    getlocal1
+    getproperty {index}
+    astype {q('GameObject', OBJECTS)}
+    setlocal2
+    getlocal2
+    iffalse loop
+    getlocal2
+    getproperty {q('_-1D')}
+    iffalse loop
+    getlocal2
+    getlocal0
+    getproperty {q('mouseX')}
+    getlocal0
+    getproperty {q('mouseY')}
+    callproperty {q('spectatorHit')}, 2
+    iffalse loop
+    getlocal2
+    astype {player_type}
+    returnvalue
+    missing:
+    pushnull
+    returnvalue'''
+    add_method(world, 'spectatorPlayer', [], code, locals_=3, returns=player_type)
+    vertices = 'QName(ProtectedNamespace("_-iP"), "vS_")'
+    code = f'''getlocal0
+    pushscope
+    getlocal0
+    getproperty {vertices}
+    setlocal3
+    getlocal3
+    getproperty {q('length')}
+    pushbyte 8
+    ifne missing
+    '''
+    for local, vertex, branch in [(1, 0, 'iflt'), (1, 2, 'ifgt'), (2, 1, 'iflt'), (2, 5, 'ifgt')]:
+        code += f'getlocal {local}\ngetlocal3\npushbyte {vertex}\ngetproperty {index}\n{branch} missing\n'
+    code += f'''getlocal0
+    getproperty QName(ProtectedNamespace("_-iP"), "bitmapFill_")
+    setlocal3
+    getlocal3
+    iffalse missing
+    getlocal3
+    getproperty {q('bitmapData')}
+    iffalse missing
+    getlocal3
+    getproperty {q('matrix')}
+    callproperty {q('clone')}, 0
+    setlocal 4
+    getlocal 4
+    callpropvoid {q('invert')}, 0
+    getlocal 4
+    findpropstrict {q('Point', 'flash.geom')}
+    getlocal1
+    getlocal2
+    constructprop {q('Point', 'flash.geom')}, 2
+    callproperty {q('transformPoint')}, 1
+    setlocal 5
+    getlocal3
+    getproperty {q('bitmapData')}
+    getlocal 5
+    getproperty {q('x')}
+    getlocal 5
+    getproperty {q('y')}
+    callproperty {q('getPixel32')}, 2
+    pushbyte 24
+    urshift
+    pushbyte 0
+    greaterthan
+    returnvalue
+    missing:
+    pushfalse
+    returnvalue'''
+    add_method(root / 'com/company/assembleegameclient/objects/GameObject.class.asasm',
+               'spectatorHit', [q('Number'), q('Number')], code, locals_=6, returns=q('Boolean'))
+
+    # Never construct bag, shop or account panels: restore only the native nearby-player list.
+    replace_method(root / '_-Rv/_-QV.class.asasm', 'draw', f'''getlocal0
+    pushscope
+    getlocal0
+    getproperty {q('_-VD')}
+    getproperty {q('parent')}
+    iftrue draw
+    getlocal0
+    getlocal0
+    getproperty {q('_-VD')}
+    callpropvoid {q('addChild')}, 1
+    draw:
+    getlocal0
+    getlocal0
+    getproperty {q('_-VD')}
+    setproperty {q('_-G2')}
+    getlocal0
+    getproperty {q('_-VD')}
+    callpropvoid {q('draw')}, 0
+    returnvoid''')
+
+    mini_private = lambda name: private(name, ui + ':_-ej#0')
+    add_method(minimap, 'spectatorInput', [mouse], f'''getlocal0
+    pushscope
+    getlocal1
+    getproperty {q('type')}
+    pushstring "mouseWheel"
+    ifne click
+    getlocal1
+    getproperty {q('delta')}
+    pushbyte 0
+    ifgt zoomIn
+    jump zoomOut
+    click:
+    getlocal1
+    getproperty {q('type')}
+    pushstring "click"
+    ifne done
+    getlocal0
+    getproperty {q('_-tk')}
+    getlocal1
+    getproperty {q('target')}
+    callproperty {q('contains')}, 1
+    iftrue zoomOut
+    getlocal0
+    getproperty {q('_-1-')}
+    getlocal1
+    getproperty {q('target')}
+    callproperty {q('contains')}, 1
+    iftrue zoomIn
+    getlocal0
+    callpropvoid {q('draw')}, 0
+    getlocal0
+    getproperty {mini_private('_-nC')}
+    getproperty {q('length')}
+    pushbyte 1
+    ifne candidates
+    getlocal0
+    getproperty {q('map_')}
+    getproperty {q('gs_')}
+    getlocal0
+    getproperty {mini_private('_-nC')}
+    pushbyte 0
+    getproperty {index}
+    getlocal1
+    callpropvoid {q('spectatorInspect')}, 2
+    returnvoid
+    candidates:
+    getlocal0
+    getlocal1
+    callpropvoid {mini_private('_-RB')}, 1
+    returnvoid
+    zoomIn:
+    getlocal0
+    callpropvoid {q('_-Kr')}, 0
+    returnvoid
+    zoomOut:
+    getlocal0
+    callpropvoid {q('_-w-')}, 0
+    done:
+    returnvoid''')
+
+    # These menus may still be reached by native hover components; strip every account/action entry.
+    replace_method(root / '_-0DB/_-02p.class.asasm', '', f'''getlocal0
+    pushscope
+    getlocal0
+    pushint 3552822
+    pushint 16777215
+    constructsuper 2
+    getlocal0
+    getlocal1
+    setproperty {q('gs_')}
+    getlocal0
+    getlocal2
+    setproperty {q('player_')}
+    getlocal0
+    findpropstrict {q('_-gV', ui)}
+    pushint 11776947
+    pushtrue
+    getlocal2
+    constructprop {q('_-gV', ui)}, 3
+    callpropvoid {q('addChild')}, 1
+    returnvoid''', constructor=True)
+    replace_method(root / '_-0DB/_-06M.class.asasm', '', f'''getlocal0
+    pushscope
+    getlocal0
+    pushint 3552822
+    pushint 16777215
+    constructsuper 2
+    getlocal0
+    getlocal1
+    setproperty {q('map_')}
+    getlocal0
+    getlocal2
+    setproperty {q('_-nC')}
+    pushbyte 0
+    setlocal3
+    loop:
+    getlocal3
+    getlocal2
+    getproperty {q('length')}
+    ifge done
+    findpropstrict {q('_-gV', ui)}
+    pushint 11776947
+    pushtrue
+    getlocal2
+    getlocal3
+    getproperty {index}
+    constructprop {q('_-gV', ui)}, 3
+    setlocal 4
+    getlocal 4
+    getlocal3
+    pushbyte 32
+    multiply
+    pushbyte 4
+    add
+    setproperty {q('y')}
+    getlocal0
+    getlocal 4
+    callpropvoid {q('addChild')}, 1
+    inclocal_i 3
+    jump loop
+    done:
+    returnvoid''', constructor=True)
+
+    # Keep packet actor references on public chat; names and classes never classify bots.
+    slot(root / 'com/company/assembleegameclient/ui/_-0At.class.asasm', 'spectatorActor', player_type, 'Null()')
+    anchor = f'      constructprop       {q("_-0At", ui)}, 7\n      coerce              {q("_-0At", ui)}\n      setlocal            8'
+    splice(chat, anchor, f'''getlocal 8
+    getlocal0
+    getproperty {private('gs_', ui + ':_-4D#0')}
+    getproperty {q('map_')}
+    getproperty {q('goDict_')}
+    getlocal2
+    getproperty {index}
+    astype {player_type}
+    setproperty {q('spectatorActor')}''')
+    anchor = f'      callproperty        {q("_-0Hu")}, 0\n      coerce              {q("TextBlock", "flash.text.engine")}\n      setlocal            6'
+    splice(chat, anchor, f'''getlocal 6
+    getlocal 5
+    setproperty {q('userData')}''')
+    replace_method(chat, '', f'''getlex {private('_-dL', ui + ':_-4D#0')}
+    pushbyte 0
+    setproperty {q('length')}
+    getlocal0
+    callpropvoid {private('_-x5', ui + ':_-4D#0')}, 0''', suffix=True, constructor=True)
+    # Ruffle has no FTE atom picking. Measure the very same native name/font, not a guessed DOM hitbox.
+    message = root / 'com/company/assembleegameclient/ui/_-0At.class.asasm'
+    slot(message, 'spectatorNameWidth', q('Number'), 'Integer(0)')
+    anchor = f'      findpropstrict      {q("TextElement", "flash.text.engine")}\n      pushstring          "<"'
+    splice(message, anchor, 'getlocal0\npushstring "<"', replace=True)
+    anchor = f'      getlocal2\n      constructprop       {q("TextElement", "flash.text.engine")}, 2'
+    splice(message, anchor, f'getlocal2\ncallproperty {q("spectatorName")}, 2', replace=True)
+    add_method(message, 'spectatorName', [q('String'), q('ElementFormat', 'flash.text.engine')], f'''getlocal0
+    pushscope
+    findpropstrict {q('TextBlock', 'flash.text.engine')}
+    findpropstrict {q('TextElement', 'flash.text.engine')}
+    getlocal1
+    getlocal2
+    constructprop {q('TextElement', 'flash.text.engine')}, 2
+    constructprop {q('TextBlock', 'flash.text.engine')}, 1
+    pushnull
+    pushshort 800
+    callproperty {q('createTextLine')}, 2
+    setlocal3
+    getlocal0
+    getlocal3
+    getproperty {q('textWidth')}
+    setproperty {q('spectatorNameWidth')}
+    findpropstrict {q('TextElement', 'flash.text.engine')}
+    getlocal1
+    getlocal2
+    constructprop {q('TextElement', 'flash.text.engine')}, 2
+    returnvalue''', locals_=4, returns=q('TextElement', 'flash.text.engine'))
+    add_method(chat, 'spectatorPlayer', [mouse], f'''getlocal0
+    pushscope
+    pushbyte -1
+    setlocal2
+    loop:
+    inclocal_i 2
+    getlocal2
+    getlocal0
+    getproperty {q('_-01P')}
+    getproperty {q('numChildren')}
+    ifge missing
+    getlocal0
+    getproperty {q('_-01P')}
+    getlocal2
+    callproperty {q('getChildAt')}, 1
+    setlocal 7
+    getlocal 7
+    getproperty {q('numChildren')}
+    iffalse loop
+    getlocal 7
+    pushbyte 0
+    callproperty {q('getChildAt')}, 1
+    astype {q('TextLine', 'flash.text.engine')}
+    setlocal3
+    getlocal3
+    iffalse loop
+    getlocal3
+    getproperty {q('textBlock')}
+    getproperty {q('userData')}
+    astype {q('_-0At', ui)}
+    setlocal 4
+    getlocal 4
+    iffalse loop
+    getlocal 4
+    getproperty {q('recipient_')}
+    pushstring ""
+    ifne loop
+    getlocal 4
+    getproperty {q('spectatorNameWidth')}
+    pushbyte 0
+    ifle loop
+    getlocal3
+    findpropstrict {q('Point', 'flash.geom')}
+    getlocal1
+    getproperty {q('stageX')}
+    getlocal1
+    getproperty {q('stageY')}
+    constructprop {q('Point', 'flash.geom')}, 2
+    callproperty {q('globalToLocal')}, 1
+    setlocal 5
+    getlocal 5
+    getproperty {q('y')}
+    getlocal3
+    getproperty {q('ascent')}
+    negate
+    iflt loop
+    getlocal 5
+    getproperty {q('y')}
+    getlocal3
+    getproperty {q('descent')}
+    ifgt loop
+    pushbyte 0
+    setlocal 6
+    getlocal 4
+    getproperty {q('_-LP')}
+    iffalse name
+    getlocal 4
+    getproperty {q('_-LP')}
+    getproperty {q('width')}
+    pushbyte 2
+    add
+    setlocal 6
+    name:
+    getlocal 5
+    getproperty {q('x')}
+    getlocal 6
+    iflt loop
+    getlocal 5
+    getproperty {q('x')}
+    getlocal 6
+    getlocal 4
+    getproperty {q('spectatorNameWidth')}
+    add
+    ifgt loop
+    getlocal 4
+    getproperty {q('spectatorActor')}
+    returnvalue
+    missing:
+    pushnull
+    returnvalue''', locals_=8, returns=player_type)
 
 
 def build(tools):
