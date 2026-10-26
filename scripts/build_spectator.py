@@ -32,7 +32,9 @@ def private(name, owner):
 
 
 def instructions(code):
-    return ''.join('      ' + line.strip() + '\n' for line in code.strip().splitlines() if line.strip())
+    # AVM2 backward branches require an encoded label opcode, not just an assembler label.
+    lines = (line.strip() for line in code.strip().splitlines() if line.strip())
+    return ''.join('      ' + line + ('\n      label' if re.fullmatch(r'\w+:', line) else '') + '\n' for line in lines)
 
 
 def replace_method(path, name, code, prefix=False, suffix=False, constructor=False):
