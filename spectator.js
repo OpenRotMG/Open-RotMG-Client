@@ -92,10 +92,6 @@
     } catch (error) {lookupError(error, current);}
   });
   window.addEventListener('pointerdown', event => {if (!menu.contains(event.target)) clearInspect();}, true);
-  // Ruffle's own context menu would cover the read-only perspective choice.
-  window.addEventListener('contextmenu', event => {
-    if (client.contains(event.target)) {event.preventDefault(); event.stopImmediatePropagation();}
-  }, true);
   window.addEventListener('keydown', event => {if (event.key === 'Escape') clearInspect();});
   window.addEventListener('resize', clearInspect);
   const publish = (status, error) => {
@@ -155,6 +151,7 @@
     socket.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     await player.ruffle().load({
       url: '/api/bots/client.swf?v=784be91a4d1264ddcb37e1e63e0955242a65a330de2dc3528a7f21d0946717ee', parameters: {bot},
+      contextMenu: 'off',
       autoplay: 'on', unmuteOverlay: 'hidden', preferredRenderer: 'wgpu-webgl',
       logLevel: 'warn', openUrlMode: 'deny', allowScriptAccess: false,
       socketProxy: [{host: '127.0.0.1', port: 2050, proxyUrl: socket.href}],
