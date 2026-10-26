@@ -8,7 +8,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const reply = (body, status = 200) => ({ok: status === 200, status, text: async () => JSON.stringify(body)});
 async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError, resolve = () => reply({bot:'Biceps', player:22, source:11})} = {}) {
   let now = 0, options, refresh, nextTimer = 0;
-  const messages = [], requests = [], errors = [], events = {}, status = {}, timers = new Map();
+  const messages = [], requests = [], errors = [], events = {}, eventOptions = {}, status = {}, timers = new Map();
   const button = {addEventListener: (name, fn) => {button[name] = fn;}};
   const menu = {hidden:true, style:{}, offsetWidth:150, offsetHeight:44,
     querySelector: () => button, contains: element => element === button};
@@ -19,7 +19,7 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
     if (loadError) throw new Error(loadError);
   }}, player = {ruffle: () => api};
   const window = {parent: {postMessage: message => messages.push(message)},
-    addEventListener: (name, callback) => {events[name] = callback;},
+    addEventListener: (name, callback, options) => {events[name] = callback;eventOptions[name] = options;},
     setInterval: callback => {refresh = callback; return 1;}, clearInterval() {},
     setTimeout: (fn, ms) => {timers.set(++nextTimer, {fn, due:now+ms}); return nextTimer;},
     clearTimeout: id => timers.delete(id)};
@@ -30,6 +30,13 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
     console: {error: error => errors.push(error), warn: error => errors.push(error)}});
   return {window, options, messages, events, status, menu, button, inspectStatus, requests, errors,
     advance: ms => {now += ms; for (const [id,timer] of timers) if (timer.due <= now) {timers.delete(id); timer.fn();} refresh();},
+    pointerDown: async () => {
+      const event = {target: {}};
+      if (eventOptions.pointerdown === true) events.pointerdown(event);
+      api.traceObserver('openrotmg-spectator:inspect:11:22:320:240');
+      if (eventOptions.pointerdown !== true) events.pointerdown(event);
+      await flush();
+    },
     click: () => button.click(), trace: message => api.traceObserver(message),
     inspect: async (from=11, target=22, x=320, y=240) => {api.traceObserver(`openrotmg-spectator:inspect:${from}:${target}:${x}:${y}`); await flush();},
     live: () => {api.traceObserver('openrotmg-spectator:source:11'); api.traceObserver('openrotmg-spectator:tick:'); api.traceObserver('openrotmg-spectator:frame:');},
@@ -132,6 +139,16 @@ test('native actor inspection resolves read-only, scales/clamps menu and posts e
   await view.inspect(11,22,800,600);
   assert.equal(view.menu.style.left, '290px');
   assert.equal(view.menu.style.top, '276px');
+});
+
+test('outside-menu capture runs before the canvas native trace, not after its lookup', async () => {
+  const view = await launch();view.live();
+  await view.pointerDown();
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.requests[0].options.signal.aborted, false);
+  assert.equal(view.menu.hidden, false);
+  await view.click();
+  assert.equal(view.messages.at(-1).type, 'openrotmg-bot-select');
 });
 
 test('human, malformed, private-field and mismatched resolver replies never offer perspective', async () => {

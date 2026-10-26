@@ -91,7 +91,7 @@
       window.parent.postMessage({type: 'openrotmg-bot-select', bot, target: choice.target}, '*');
     } catch (error) {lookupError(error, current);}
   });
-  window.addEventListener('pointerdown', event => {if (!menu.contains(event.target)) clearInspect();});
+  window.addEventListener('pointerdown', event => {if (!menu.contains(event.target)) clearInspect();}, true);
   window.addEventListener('keydown', event => {if (event.key === 'Escape') clearInspect();});
   window.addEventListener('resize', clearInspect);
   const publish = (status, error) => {
