@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import {createHash} from 'node:crypto';
 
 const script = await readFile(new URL('../spectator.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -45,10 +46,12 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
 
 test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 800x600 ratio', async () => {
   const {options, messages} = await launch();
-  assert.equal(options.url, '/api/bots/client.swf');
+  const lock = JSON.parse(await readFile(new URL('../spectator/lock.json', import.meta.url), 'utf8'));
+  assert.equal(options.url, `/api/bots/client.swf?v=${lock.outputSha256}`);
   assert.equal(options.parameters.bot, 'Triceps');
   assert.equal(options.socketProxy.length, 1);
   assert.equal(options.socketProxy[0].proxyUrl, 'wss://game.example/api/bots/Triceps/socket');
+  assert.equal(options.contextMenu, 'off');
   assert.equal(options.openUrlMode, 'deny');
   assert.equal(options.allowScriptAccess, false);
   assert.equal(options.urlRewriteRules.length, 2);
@@ -57,6 +60,7 @@ test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 
   assert.equal(messages[0].type, 'openrotmg-bot-view');
   assert.equal(messages[0].bot, 'Triceps');
   const html = await readFile(new URL('../spectator.html', import.meta.url), 'utf8');
+  assert.ok(html.includes(`/api/bots/spectator.js?v=${createHash('sha256').update(script).digest('hex')}`), 'viewer must invalidate the cached script when it changes');
   assert.match(html, /aspect-ratio:4\/3/);
   assert.match(html, /100vh \* 4 \/ 3/);
   assert.doesNotMatch(html, /launcher.js|<canvas|Play|account|legacy-api/);

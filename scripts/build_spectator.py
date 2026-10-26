@@ -544,7 +544,7 @@ def spectator_interactions(root):
     done:
     returnvoid''', locals_=4)
 
-    # Capture stays closed: dispatch only native public-player inspection and minimap zoom.
+    # Match _-w6.onMouseDown inspection for both buttons without restoring its playable menu.
     add_method(game, 'spectatorInput', [q('Event', 'flash.events')], f'''getlocal0
     pushscope
     getlocal1
@@ -552,12 +552,20 @@ def spectator_interactions(root):
     setlocal2
     getlocal2
     iffalse done
+    getlocal2
+    getproperty {q('type')}
+    setlocal 5
+    getlocal 5
+    pushstring "rightMouseDown"
+    ifne inputType
+    pushstring "mouseDown"
+    setlocal 5
+    inputType:
     getlocal0
     getproperty {q('map_')}
     getproperty {q('player_')}
     iffalse done
-    getlocal2
-    getproperty {q('type')}
+    getlocal 5
     pushstring "mouseDown"
     ifne targets
     getlocal0
@@ -588,8 +596,7 @@ def spectator_interactions(root):
     callpropvoid {q('spectatorInput')}, 1
     returnvoid
     nearby:
-    getlocal2
-    getproperty {q('type')}
+    getlocal 5
     pushstring "mouseDown"
     ifne next
     getlocal3
@@ -624,8 +631,7 @@ def spectator_interactions(root):
     setlocal3
     jump ancestors
     world:
-    getlocal2
-    getproperty {q('type')}
+    getlocal 5
     pushstring "mouseDown"
     ifne done
     getlocal0
@@ -642,7 +648,7 @@ def spectator_interactions(root):
     getlocal2
     callpropvoid {q('spectatorInspect')}, 2
     done:
-    returnvoid''', locals_=5)
+    returnvoid''', locals_=6)
 
     # The rendered quad and draw order are authoritative, not inferred world-distance circles.
     world = root / 'com/company/assembleegameclient/map/_-Xl.class.asasm'
