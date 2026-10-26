@@ -280,6 +280,8 @@ class SpectatorBuildTests(unittest.TestCase):
                 self.assertIn('callpropvoid        ' + spectator.q(name), block)
             control = method('com/company/assembleegameclient/game/GameSprite.class.asasm', 'spectatorInput')
             self.assertIn('pushstring          "mouseDown"', control)
+            self.assertIn('pushstring          "rightMouseDown"', control)
+            self.assertEqual(control.count('getlocal            5'), 4)
             self.assertIn(spectator.q('_-gV', 'com.company.assembleegameclient.ui'), control)
             self.assertIn(spectator.q('_-w6', '_-Rv'), control)
             self.assertIn(spectator.q('spectatorInspect'), control)

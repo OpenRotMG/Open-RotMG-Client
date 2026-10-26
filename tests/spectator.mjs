@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import {createHash} from 'node:crypto';
 
 const script = await readFile(new URL('../spectator.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -13,7 +14,7 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
   const menu = {hidden:true, style:{}, offsetWidth:150, offsetHeight:44,
     querySelector: () => button, contains: element => element === button};
   const inspectStatus = {};
-  const client = {append() {}, getBoundingClientRect: () => ({left:40, top:20, width:400, height:300, right:440, bottom:320})};
+  const client = {append() {}, contains: element => element === player, getBoundingClientRect: () => ({left:40, top:20, width:400, height:300, right:440, bottom:320})};
   const api = {load: async value => {
     options = value;
     if (loadError) throw new Error(loadError);
@@ -28,7 +29,7 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
     performance: {now: () => now}, location: {pathname: path, href: `https://game.example${path}`, protocol: 'https:'}, URL, AbortController,
     fetch: (url, opts) => {requests.push({url, options:opts}); return resolve(url, opts);},
     console: {error: error => errors.push(error), warn: error => errors.push(error)}});
-  return {window, options, messages, events, status, menu, button, inspectStatus, requests, errors,
+  return {window, options, messages, events, status, menu, button, player, inspectStatus, requests, errors,
     advance: ms => {now += ms; for (const [id,timer] of timers) if (timer.due <= now) {timers.delete(id); timer.fn();} refresh();},
     pointerDown: async () => {
       const event = {target: {}};
@@ -45,7 +46,8 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
 
 test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 800x600 ratio', async () => {
   const {options, messages} = await launch();
-  assert.equal(options.url, '/api/bots/client.swf');
+  const lock = JSON.parse(await readFile(new URL('../spectator/lock.json', import.meta.url), 'utf8'));
+  assert.equal(options.url, `/api/bots/client.swf?v=${lock.outputSha256}`);
   assert.equal(options.parameters.bot, 'Triceps');
   assert.equal(options.socketProxy.length, 1);
   assert.equal(options.socketProxy[0].proxyUrl, 'wss://game.example/api/bots/Triceps/socket');
@@ -57,9 +59,21 @@ test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 
   assert.equal(messages[0].type, 'openrotmg-bot-view');
   assert.equal(messages[0].bot, 'Triceps');
   const html = await readFile(new URL('../spectator.html', import.meta.url), 'utf8');
+  assert.ok(html.includes(`/api/bots/spectator.js?v=${createHash('sha256').update(script).digest('hex')}`), 'viewer must invalidate the cached script when it changes');
   assert.match(html, /aspect-ratio:4\/3/);
   assert.match(html, /100vh \* 4 \/ 3/);
   assert.doesNotMatch(html, /launcher.js|<canvas|Play|account|legacy-api/);
+});
+
+test('native context menu cannot cover inspection; HTML controls retain their context menus', async () => {
+  const view = await launch();
+  for (const inside of [true, false]) {
+    let prevented = false, stopped = false;
+    view.events.contextmenu({target: inside ? view.player : view.button,
+      preventDefault: () => {prevented = true;}, stopImmediatePropagation: () => {stopped = true;}});
+    assert.equal(prevented, inside);
+    assert.equal(stopped, inside);
+  }
 });
 
 test('live requires completed native drawing AND ticks, stale requires both to recover', async () => {
