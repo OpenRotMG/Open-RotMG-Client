@@ -93,7 +93,9 @@ test('native cursor draw traces remain observable without substituting for frame
   const view = await launch();
   const trace = 'openrotmg-spectator:cursor:11:7:42:2.25:-3.5:295:302.5:1';
   view.trace(trace);
-  assert.deepEqual(view.cursorTraces, [trace]);
+  const composition = 'openrotmg-spectator:compose:11:7:42:1:wts';
+  view.trace(composition);
+  assert.deepEqual(view.cursorTraces, [trace, composition]);
   assert.equal(view.messages.at(-1).status, 'connecting');
   view.native('tick');
   view.trace(trace);

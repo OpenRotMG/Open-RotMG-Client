@@ -162,7 +162,7 @@
       ]
     });
     player.ruffle().traceObserver = message => {
-      if (message.startsWith('openrotmg-spectator:cursor:')) {console.debug(message); return;}
+      if (message.startsWith('openrotmg-spectator:cursor:') || message.startsWith('openrotmg-spectator:compose:')) {console.debug(message); return;}
       if (message.startsWith('openrotmg-spectator:inspect:')) {void inspect(message); return;}
       if (message.startsWith('openrotmg-spectator:source:')) {
         const value = /^openrotmg-spectator:source:(-?\d+)$/.exec(message);
