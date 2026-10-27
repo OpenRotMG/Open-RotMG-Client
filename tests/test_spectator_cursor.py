@@ -226,6 +226,13 @@ class CursorTests(unittest.TestCase):
         self.game['spectatorFrameTime'] = self.vm.now
         draw()
         self.assertEqual(len(self.vm.traces), count, 'new packets do not bypass the1Hz trace limit')
+        self.vm.now = 2147483640
+        self.consume(tick=6)
+        self.vm.now = -2147482657
+        self.assertTrue(draw()['visible'], '999ms after signed timer wrap')
+        self.vm.now = -2147482656
+        self.assertFalse(draw()['visible'], 'expires at1000ms across signed timer wrap')
+        self.consume(tick=7)
         player['_-aY'] = 0
         self.assertFalse(draw()['visible'])
         self.assertFalse(self.game['cursorAttached'])

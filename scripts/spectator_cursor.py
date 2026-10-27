@@ -179,6 +179,7 @@ def transform(root):
     getlocal1
     {get('cursorTime')}
     subtract
+    convert_u
     pushshort 1000
     ifge done
     {get('map_')}

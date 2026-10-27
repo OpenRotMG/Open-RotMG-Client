@@ -151,7 +151,7 @@
     socket.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket.searchParams.set('cursor', '1');
     await player.ruffle().load({
-      url: '/api/bots/client.swf?v=7636f2cce2d2fcfeb6c8351b48c3c87566e1da7cdb2ed3079e3fe3e5af57b109', parameters: {bot},
+      url: '/api/bots/client.swf?v=02ce5f05395aac9283688f3b6a64a907ca654f6d076353f89036bb14a00c10d9', parameters: {bot},
       contextMenu: 'off',
       autoplay: 'on', unmuteOverlay: 'hidden', preferredRenderer: 'wgpu-webgl',
       logLevel: 'warn', openUrlMode: 'deny', allowScriptAccess: false,
