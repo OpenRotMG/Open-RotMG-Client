@@ -380,6 +380,8 @@ def transform(root):
     returnvoid''')
     replace_method(root / 'com/company/assembleegameclient/game/_-07a.class.asasm', 'onAddedToStage', 'getlocal0\npushscope\nreturnvoid')
     spectator_interactions(root)
+    from spectator_cursor import transform as cursor_transform
+    cursor_transform(root)
 
     # Only initialization and transport acknowledgements may reach the socket.
     allowed = [17, 45, 16, 22, 14, 11]
@@ -1047,7 +1049,7 @@ def build(tools):
             raise RuntimeError('Expected well-formed uncompressed SWF from assembler')
         result = b'CWS' + result[3:8] + zlib.compress(result[8:], 9)
         if len(result) != LOCK['outputBytes'] or hashlib.sha256(result).hexdigest() != LOCK['outputSha256']:
-            raise RuntimeError('Spectator output checksum mismatch; inspect source/toolchain/transform before updating lock')
+            raise RuntimeError(f'Spectator output checksum mismatch: SHA256 {hashlib.sha256(result).hexdigest()} ({len(result)} bytes); inspect source/toolchain/transform before updating lock')
         (ROOT / 'spectator.swf').write_bytes(result)
         print(f'Spectator SHA256 {hashlib.sha256(result).hexdigest()} ({len(result)} bytes)')
 

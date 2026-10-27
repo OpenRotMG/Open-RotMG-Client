@@ -102,7 +102,7 @@ def interaction_bytecode(data):
             elif kind in (1, 2, 3):
                 uint()
                 method = uint()
-                if name.startswith('spectator'):
+                if name.startswith('spectator') or (class_name == 'GameSprite' and name == 'onEnterFrame'):
                     methods[method] = name
             elif kind in (4, 5):
                 many(2)
@@ -111,8 +111,10 @@ def interaction_bytecode(data):
             if flags & 64:
                 many(uint())
     classes = uint()
+    class_name = ''
     for _ in range(classes):
         name = names[uint()]
+        class_name = name
         uint()
         if u8() & 8:
             uint()
@@ -121,6 +123,7 @@ def interaction_bytecode(data):
         if name == '_-06M':
             methods[init] = name + ':init'
         traits()
+    class_name = ''
     for _ in range(classes):
         uint(); traits()
     for _ in range(uint()):
@@ -142,8 +145,8 @@ def interaction_bytecode(data):
 
 def encoded_branches(code):
     position, starts, branches = 0, set(), []
-    single = {9, 0x20, 0x26, 0x27, 0x30, 0x47, 0x48, 0x90, 0xa0, 0xa1, 0xa2, 0xa7, 0xab, 0xaf, *range(0xd0, 0xd8)}
-    operands = {op: 1 for op in [0x25, 0x2c, 0x2d, 0x42, 0x49, 0x55, 0x5d, 0x5e, 0x60, 0x61, 0x62, 0x63, 0x66, 0x68, 0x80, 0x86, 0xb2, 0xc2, 0xc3]}
+    single = {3, 9, 0x20, 0x26, 0x27, 0x30, 0x47, 0x48, 0x74, 0x90, 0xa0, 0xa1, 0xa2, 0xa7, 0xab, 0xaf, *range(0xd0, 0xd8)}
+    operands = {op: 1 for op in [0x25, 0x2c, 0x2d, 0x2e, 0x42, 0x49, 0x55, 0x5d, 0x5e, 0x60, 0x61, 0x62, 0x63, 0x66, 0x68, 0x80, 0x86, 0xb2, 0xc2, 0xc3]}
     operands.update({0x46: 2, 0x4a: 2, 0x4f: 2})
     while position < len(code):
         start = position
@@ -216,7 +219,8 @@ class SpectatorBuildTests(unittest.TestCase):
             subprocess.run([str(tools / 'abcexport'), str(root / 'spectator.swf')], check=True)
             subprocess.run([str(tools / 'rabcdasm'), str(root / 'spectator-1.abc')], check=True)
             bodies = interaction_bytecode((root / 'spectator-1.abc').read_bytes())
-            self.assertGreaterEqual(len(bodies), 10)
+            self.assertTrue({'spectatorCursorParse', 'spectatorCursor', 'spectatorCursorDraw',
+                             'spectatorCursorAttach', 'spectatorCursorReset'}.issubset({name for name, _ in bodies}))
             for name, code in bodies:
                 with self.subTest(encoded_method=name):
                     encoded_branches(code)
@@ -232,6 +236,12 @@ class SpectatorBuildTests(unittest.TestCase):
             tick = net[tick_start:net.index('  end ; trait', tick_start)]
             self.assertIn('"tickTime_"', tick)
             self.assertIn('"tickId_"', tick)
+            self.assertIn('pushshort           250', net)
+            self.assertIn(spectator.q('spectatorCursor'), net)
+            packet = (abc / 'com/company/net/_-098.class.asasm').read_text()
+            self.assertIn('pushbyte            21', packet)
+            for field in ['readInt', 'readUnsignedInt', 'readFloat', 'readUnsignedByte', 'isFinite']:
+                self.assertIn(spectator.q(field), packet)
             self.assertIn('openrotmg-spectator:tick:', tick)
             notification_start = net.index('  trait method ' + spectator.private('_-Lx', spectator.NET + ':_-1f#0'))
             notification = net[notification_start:net.index('  end ; trait', notification_start)]
@@ -267,6 +277,22 @@ class SpectatorBuildTests(unittest.TestCase):
                 start = re.search(r'(?m)^  trait method [^\n]*, "' + re.escape(name) + r'"\)', text).start()
                 return text[start:text.index('  end ; trait', start)]
 
+            net_path = 'com/company/assembleegameclient/net/_-1f.class.asasm'
+            game_path = 'com/company/assembleegameclient/game/GameSprite.class.asasm'
+            attach = method(net_path, '_-cw')
+            for field in ['objectId_', 'charId_', 'spectatorCursorAttach']:
+                self.assertIn(spectator.q(field), attach)
+            for name in ['_-ju', '_-X3', '_-038', '_-of', 'onError', '_-nc']:
+                self.assertIn(spectator.q('spectatorCursorReset'), method(net_path, name))
+            self.assertIn(spectator.q('spectatorCursorReset'), method(game_path, 'onRemovedFromStage'))
+            cursor = method(game_path, 'spectatorCursorDraw')
+            for field in ['wToS_', 'transformVector', '_-FL', 'contains', 'drawCircle', 'lineStyle', 'goDict_', '_-aY']:
+                self.assertIn(spectator.q(field), cursor)
+            self.assertNotIn(spectator.q('angleRad_'), cursor)
+            self.assertIn('openrotmg-spectator:cursor', cursor)
+            self.assertIn(spectator.q('localToGlobal'), cursor)
+            self.assertIn(spectator.q('cursorTracePending'), cursor)
+            self.assertIn('pushshort           1000', cursor)
             initialize = method('com/company/assembleegameclient/game/GameSprite.class.asasm', 'initialize')
             self.assertNotIn(spectator.q('mui_'), initialize)
             for path, name in [('com/company/assembleegameclient/net/_-1f.class.asasm', 'move'),
