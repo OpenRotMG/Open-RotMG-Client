@@ -149,8 +149,9 @@
     client.append(player);
     const socket = new URL(`/api/bots/${encodeURIComponent(bot)}/socket`, location.href);
     socket.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket.searchParams.set('cursor', '1');
     await player.ruffle().load({
-      url: '/api/bots/client.swf?v=784be91a4d1264ddcb37e1e63e0955242a65a330de2dc3528a7f21d0946717ee', parameters: {bot},
+      url: '/api/bots/client.swf?v=68a6da63b586439017f9b5a9ee61939494be06766b10f068fd099806ea689946', parameters: {bot},
       contextMenu: 'off',
       autoplay: 'on', unmuteOverlay: 'hidden', preferredRenderer: 'wgpu-webgl',
       logLevel: 'warn', openUrlMode: 'deny', allowScriptAccess: false,
