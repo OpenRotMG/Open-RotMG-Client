@@ -61,7 +61,7 @@ def transform(root):
     ifgt invalid
     {get('chatDraft')}
     getproperty {q('length')}
-    pushshort 256
+    pushshort 128
     ifgt invalid
     {get('chatDraft')}
     pushbyte 0

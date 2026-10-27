@@ -65,7 +65,9 @@ class CursorInstructions:
             elif op == 'getproperty':
                 key = stack.pop() if arg.startswith('MultinameL') else prop
                 obj = stack.pop()
-                stack.append(obj.get(key) if isinstance(obj, dict) else len(obj) if key == 'length' else getattr(obj, key))
+                stack.append(obj.get(key) if isinstance(obj, dict) else
+                             len(obj.encode('utf-16-le')) // 2 if key == 'length' and isinstance(obj, str) else
+                             len(obj) if key == 'length' else getattr(obj, key))
             elif op == 'setproperty':
                 value, obj = stack.pop(), stack.pop()
                 obj[prop] = value
@@ -287,8 +289,11 @@ class CursorTests(unittest.TestCase):
         self.assertNotIn('gsc_', code)
 
     def test_chat_invalid_wire_identity_order_expiry_and_resets(self):
+        for draft in ['x' * 128, '😀' * 64]:
+            self.assertEqual(self.chat_packet(draft=draft)['chatDraft'], draft)
         for kwargs in [dict(body=b'\0' * 14), dict(body=b'\0' * 528), dict(phase=3),
-                       dict(phase=0, draft='not closed'), dict(draft='/tell private'), dict(draft='x' * 257)]:
+                       dict(phase=0, draft='not closed'), dict(draft='/tell private'),
+                       dict(draft='x' * 129), dict(draft='😀' * 65)]:
             with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, 'Invalid spectator composition'):
                 self.chat_packet(**kwargs)
         self.vm.now = 2147483640
