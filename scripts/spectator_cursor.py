@@ -1,5 +1,5 @@
 """Spectator-only packet 250 and native camera-projected, read-only marker."""
-from build_spectator import GAME, NET, add_method, instructions, q, replace_method, status
+from build_spectator import GAME, NET, add_method, instructions, private, q, replace_method, status
 
 
 def transform(root):
@@ -23,7 +23,8 @@ def transform(root):
 
     fields = [('cursorPlayer', 'int', 'readInt'), ('cursorCharacter', 'int', 'readInt'),
               ('cursorTick', 'uint', 'readUnsignedInt'), ('cursorX', 'Number', 'readFloat'),
-              ('cursorY', 'Number', 'readFloat'), ('cursorFire', 'uint', 'readUnsignedByte')]
+              ('cursorY', 'Number', 'readFloat'), ('cursorFire', 'uint', 'readUnsignedByte'),
+              ('cursorAnchorX', 'Number', 'readFloat'), ('cursorAnchorY', 'Number', 'readFloat')]
     for name, type_, _ in fields:
         slot(packet, name, type_, 'Integer(0)')
         slot(game, name, type_, 'Integer(0)')
@@ -56,12 +57,12 @@ def transform(root):
     pushshort 250
     ifne done
     {get('bytesAvailable', 1)}
-    pushbyte 21
+    pushbyte 29
     ifne invalid
     '''
     for name, _, read in fields:
         parse += set_(name, f'getlocal1\ncallproperty {q(read)}, 0') + '\n'
-    for name in ['cursorX', 'cursorY']:
+    for name in ['cursorX', 'cursorY', 'cursorAnchorX', 'cursorAnchorY']:
         parse += f'findpropstrict {q("isFinite")}\n{get(name)}\ncallproperty {q("isFinite")}, 1\niffalse invalid\n'
     parse += f'''{get('cursorFire')}
     pushbyte 1
@@ -69,7 +70,7 @@ def transform(root):
     done:
     returnvoid
     invalid:
-    {status('error', 'Invalid cursor packet250: expected21bytes finite x/y fire0/1')}
+    {status('error', 'Invalid cursor packet250: expected29bytes finite cursor/anchor fire0/1')}
     findpropstrict {q('Error')}
     pushstring "Invalid spectator cursor packet250"
     constructprop {q('Error')}, 1
@@ -84,6 +85,7 @@ def transform(root):
 
     add_method(game, 'spectatorCursorReset', [], f'''getlocal0
     pushscope
+    {call('spectatorChatReset')}
     {set_('cursorAttached', 'pushfalse')}
     {set_('cursorReady', 'pushfalse')}
     {set_('cursorHasTick', 'pushfalse')}
@@ -156,20 +158,24 @@ def transform(root):
     add_method(game, 'spectatorCursor', [q('_-098', 'com.company.net')], consume, locals_=3)
 
     # This runs even without a player, so death/removal cannot leave the last marker on screen.
-    replace_method(game, 'onEnterFrame', f'''{get('cursorShape')}
+    replace_method(game, 'onEnterFrame', f'''{call('spectatorChatExpire')}
+    {get('cursorShape')}
     iffalse cursorHidden
     {get('cursorShape')}
     pushfalse
     setproperty {q('visible')}
     cursorHidden:''', prefix=True)
-    # draw uses the camera matrix after the same native camera/map update as every world object.
+    # The anchor removes server/native pose skew without reconstructing a cursor from the firing angle.
     anchor = f'      callpropvoid {q("draw")}, 2\n'
     text = game.read_text()
     if text.count(anchor) != 1:
         raise RuntimeError('Expected one spectator map draw')
     game.write_text(text.replace(anchor, anchor + instructions(f'''getlocal0
     getlocal2
-    callpropvoid {q('spectatorCursorDraw')}, 1''')))
+    callpropvoid {q('spectatorCursorDraw')}, 1
+    getlocal0
+    getlocal2
+    callpropvoid {q('spectatorChatDraw')}, 1''')))
 
     shape = f'findpropstrict {q("Shape", "flash.display")}\nconstructprop {q("Shape", "flash.display")}, 0'
     draw = f'''getlocal0
@@ -208,7 +214,15 @@ def transform(root):
     getproperty {q('wToS_')}
     findpropstrict {q('Vector3D', 'flash.geom')}
     {get('cursorX')}
+    {get('cursorAnchorX')}
+    subtract
+    {get('x_', 2)}
+    add
     {get('cursorY')}
+    {get('cursorAnchorY')}
+    subtract
+    {get('y_', 2)}
+    add
     pushbyte 0
     constructprop {q('Vector3D', 'flash.geom')}, 3
     callproperty {q('transformVector')}, 1
@@ -240,29 +254,23 @@ def transform(root):
     setlocal 4
     getlocal 4
     callpropvoid {q('clear')}, 0
-    pushint 16777215
-    setlocal 5
-    {get('cursorFire')}
-    iffalse color
-    pushint 16744448
-    setlocal 5
-    color:
     getlocal 4
-    pushbyte 2
-    getlocal 5
+    pushbyte 1
+    pushbyte 0
     pushbyte 1
     callpropvoid {q('lineStyle')}, 3
     getlocal 4
-    pushbyte 0
-    pushbyte 0
-    pushbyte 5
-    callpropvoid {q('drawCircle')}, 3
+    pushint 16777215
+    pushbyte 1
+    callpropvoid {q('beginFill')}, 2
     '''
-    for method, x, y in [('moveTo', -9, 0), ('lineTo', -3, 0), ('moveTo', 3, 0),
-                          ('lineTo', 9, 0), ('moveTo', 0, -9), ('lineTo', 0, -3),
-                          ('moveTo', 0, 3), ('lineTo', 0, 9)]:
+    for method, x, y in [('moveTo', 0, 0), ('lineTo', 0, 18), ('lineTo', 5, 13),
+                          ('lineTo', 9, 22), ('lineTo', 12, 20), ('lineTo', 8, 12),
+                          ('lineTo', 15, 12), ('lineTo', 0, 0)]:
         draw += f'getlocal 4\npushbyte {x}\npushbyte {y}\ncallpropvoid {q(method)}, 2\n'
-    draw += f'''{get('cursorTracePending')}
+    draw += f'''getlocal 4
+    callpropvoid {q('endFill')}, 0
+    {get('cursorTracePending')}
     iffalse done
     getlocal1
     {get('spectatorFrameTime')}
@@ -280,7 +288,7 @@ def transform(root):
     findpropstrict {q('trace')}
     pushstring "openrotmg-spectator:cursor"
     '''
-    for name, local in [(name, 0) for name, _, _ in fields[:-1]] + [('x', 3), ('y', 3), ('cursorFire', 0)]:
+    for name, local in [(name, 0) for name, _, _ in fields[:5]] + [('x', 3), ('y', 3), ('cursorFire', 0)]:
         draw += f'pushstring ":"\nadd\n{get(name, local)}\nadd\n'
     draw += f'''callpropvoid {q('trace')}, 1
     done:
@@ -304,3 +312,6 @@ def transform(root):
     cursorSourceGone:
     {call('spectatorCursorReset')}
     cursorSourceBound:''')))
+
+    from spectator_chat import transform as chat_transform
+    chat_transform(root)

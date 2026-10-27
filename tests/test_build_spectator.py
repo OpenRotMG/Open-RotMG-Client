@@ -220,7 +220,9 @@ class SpectatorBuildTests(unittest.TestCase):
             subprocess.run([str(tools / 'rabcdasm'), str(root / 'spectator-1.abc')], check=True)
             bodies = interaction_bytecode((root / 'spectator-1.abc').read_bytes())
             self.assertTrue({'spectatorCursorParse', 'spectatorCursor', 'spectatorCursorDraw',
-                             'spectatorCursorAttach', 'spectatorCursorReset'}.issubset({name for name, _ in bodies}))
+                             'spectatorCursorAttach', 'spectatorCursorReset', 'spectatorChatParse',
+                             'spectatorChat', 'spectatorChatDraw', 'spectatorChatReset',
+                             'spectatorChatExpire', 'spectatorCompose'}.issubset({name for name, _ in bodies}))
             for name, code in bodies:
                 with self.subTest(encoded_method=name):
                     encoded_branches(code)
@@ -239,8 +241,11 @@ class SpectatorBuildTests(unittest.TestCase):
             self.assertIn('pushshort           250', net)
             self.assertIn(spectator.q('spectatorCursor'), net)
             packet = (abc / 'com/company/net/_-098.class.asasm').read_text()
-            self.assertIn('pushbyte            21', packet)
-            for field in ['readInt', 'readUnsignedInt', 'readFloat', 'readUnsignedByte', 'isFinite']:
+            self.assertIn('pushshort           251', net)
+            self.assertIn(spectator.q('spectatorChat'), net)
+            self.assertIn('pushbyte            29', packet)
+            self.assertIn('pushbyte            15', packet)
+            for field in ['readInt', 'readUnsignedInt', 'readFloat', 'readUnsignedByte', 'readUTF', 'isFinite']:
                 self.assertIn(spectator.q(field), packet)
             self.assertIn('openrotmg-spectator:tick:', tick)
             notification_start = net.index('  trait method ' + spectator.private('_-Lx', spectator.NET + ':_-1f#0'))
@@ -286,7 +291,9 @@ class SpectatorBuildTests(unittest.TestCase):
                 self.assertIn(spectator.q('spectatorCursorReset'), method(net_path, name))
             self.assertIn(spectator.q('spectatorCursorReset'), method(game_path, 'onRemovedFromStage'))
             cursor = method(game_path, 'spectatorCursorDraw')
-            for field in ['wToS_', 'transformVector', '_-FL', 'contains', 'drawCircle', 'lineStyle', 'goDict_', '_-aY']:
+            self.assertNotIn(spectator.q('drawCircle'), cursor)
+            for field in ['wToS_', 'transformVector', '_-FL', 'contains', 'beginFill', 'endFill', 'lineTo',
+                          'lineStyle', 'goDict_', '_-aY', 'cursorAnchorX', 'cursorAnchorY']:
                 self.assertIn(spectator.q(field), cursor)
             self.assertNotIn(spectator.q('angleRad_'), cursor)
             self.assertIn('openrotmg-spectator:cursor', cursor)

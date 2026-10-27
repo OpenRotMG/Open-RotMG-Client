@@ -50,7 +50,7 @@ test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 
   assert.equal(options.url, `/api/bots/client.swf?v=${lock.outputSha256}`);
   assert.equal(options.parameters.bot, 'Triceps');
   assert.equal(options.socketProxy.length, 1);
-  assert.equal(options.socketProxy[0].proxyUrl, 'wss://game.example/api/bots/Triceps/socket?cursor=1');
+  assert.equal(options.socketProxy[0].proxyUrl, 'wss://game.example/api/bots/Triceps/socket?cursor=2');
   assert.equal(options.contextMenu, 'off');
   assert.equal(options.openUrlMode, 'deny');
   assert.equal(options.allowScriptAccess, false);
