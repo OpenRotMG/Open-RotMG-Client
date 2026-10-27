@@ -139,7 +139,8 @@ def transform(root):
     '''
     for name, _, _ in fields[2:]:
         consume += set_(name, get(name, 1)) + '\n'
-    consume += f'''{set_('cursorTime', f'findpropstrict {q("getTimer", "flash.utils")}\ncallproperty {q("getTimer", "flash.utils")}, 0')}
+    timer = f'findpropstrict {q("getTimer", "flash.utils")}\ncallproperty {q("getTimer", "flash.utils")}, 0'
+    consume += f'''{set_('cursorTime', timer)}
     {set_('cursorReady', 'pushtrue')}
     {set_('cursorHasTick', 'pushtrue')}
     {set_('cursorTracePending', 'pushtrue')}
@@ -170,6 +171,7 @@ def transform(root):
     getlocal2
     callpropvoid {q('spectatorCursorDraw')}, 1''')))
 
+    shape = f'findpropstrict {q("Shape", "flash.display")}\nconstructprop {q("Shape", "flash.display")}, 0'
     draw = f'''getlocal0
     pushscope
     {get('cursorAttached')}
@@ -219,7 +221,7 @@ def transform(root):
     iffalse done
     {get('cursorShape')}
     iftrue shape
-    {set_('cursorShape', f'findpropstrict {q("Shape", "flash.display")}\nconstructprop {q("Shape", "flash.display")}, 0')}
+    {set_('cursorShape', shape)}
     {get('map_')}
     {get('cursorShape')}
     callpropvoid {q('addChild')}, 1
