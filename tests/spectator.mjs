@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 const script = await readFile(new URL('../spectator.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const reply = (body, status = 200) => ({ok: status === 200, status, text: async () => JSON.stringify(body)});
-async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError, resolve = () => reply({bot:'Biceps', player:22, source:11})} = {}) {
+async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError, loadDelay = 0, resolve = () => reply({bot:'Biceps', player:22, source:11})} = {}) {
   let now = 0, options, refresh, nextTimer = 0;
   const messages = [], requests = [], errors = [], cursorTraces = [], events = {}, eventOptions = {}, status = {}, timers = new Map();
   const button = {addEventListener: (name, fn) => {button[name] = fn;}};
@@ -17,6 +17,7 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
   const client = {append() {}, getBoundingClientRect: () => ({left:40, top:20, width:400, height:300, right:440, bottom:320})};
   const api = {load: async value => {
     options = value;
+    if (loadDelay) {now += loadDelay;refresh();}
     if (loadError) throw new Error(loadError);
   }}, player = {ruffle: () => api};
   const window = {parent: {postMessage: message => messages.push(message)},
@@ -103,6 +104,17 @@ test('native cursor draw traces remain observable without substituting for frame
   view.native('frame');
   assert.equal(view.messages.at(-1).status, 'live');
   assert.equal(view.errors.length, 0);
+});
+
+test('cold renderer initialization is bounded separately from the unchanged native first-frame deadline', async () => {
+  const view = await launch({loadDelay: 19000});
+  assert.equal(view.messages.at(-1).status, 'connecting');assert.equal(view.errors.length, 0);
+  view.advance(14999);assert.equal(view.messages.at(-1).status, 'connecting');
+  view.advance(1);assert.equal(view.messages.at(-1).status, 'error');
+  assert.match(view.messages.at(-1).error, /within 15 seconds/);
+  const stuck = await launch({loadDelay: 60000});
+  assert.equal(stuck.messages.at(-1).status, 'error');
+  assert.match(stuck.messages.at(-1).error, /renderer.*initialize.*60 seconds/i);
 });
 
 test('steady native rendering sends live heartbeats without inventing state changes', async () => {

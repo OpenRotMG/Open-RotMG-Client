@@ -4,7 +4,8 @@
   const bot = decodeURIComponent(match[1]);
   if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(bot)) throw new Error('Invalid bot name');
   const label = document.querySelector('#status');
-  let state, failure, connectedAt = performance.now(), lastFrame = null, lastTick = null;
+  const initializingAt = performance.now();
+  let state, failure, connectedAt = null, lastFrame = null, lastTick = null;
   const menu = document.querySelector('#perspective');
   const inspectStatus = document.querySelector('#inspect-status');
   const client = document.querySelector('#client');
@@ -115,8 +116,9 @@
     const now = performance.now();
     if (lastFrame !== null && lastTick !== null) {
       publish(now - lastFrame < 5000 && now - lastTick < 5000 ? 'live' : 'stale');
-    } else if (now - connectedAt >= 15000) {
-      fail(new Error('Native view did not draw a bot and receive a tick within 15 seconds'));
+    } else if (connectedAt === null ? now - initializingAt >= 60000 : now - connectedAt >= 15000) {
+      fail(new Error(connectedAt === null ? 'Native renderer did not initialize within 60 seconds'
+        : 'Native view did not draw a bot and receive a tick within 15 seconds'));
     }
   };
   const nativeStatus = (status, error) => {
@@ -161,6 +163,9 @@
         [/^https?:\/\/realmofthemadgod\.appspot\.com\/music\//, new URL('/sfx/music/', location.href).href]
       ]
     });
+    if (performance.now() - initializingAt >= 60000) throw new Error('Native renderer did not initialize within 60 seconds');
+    // Cold WASM/GPU startup is not a native connection attempt; its own bounded deadline remains above.
+    connectedAt ??= performance.now();
     player.ruffle().traceObserver = message => {
       if (message.startsWith('openrotmg-spectator:cursor:') || message.startsWith('openrotmg-spectator:compose:')) {console.debug(message); return;}
       if (message.startsWith('openrotmg-spectator:inspect:')) {void inspect(message); return;}
