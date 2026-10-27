@@ -151,7 +151,7 @@
     socket.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket.searchParams.set('cursor', '1');
     await player.ruffle().load({
-      url: '/api/bots/client.swf?v=68a6da63b586439017f9b5a9ee61939494be06766b10f068fd099806ea689946', parameters: {bot},
+      url: '/api/bots/client.swf?v=7636f2cce2d2fcfeb6c8351b48c3c87566e1da7cdb2ed3079e3fe3e5af57b109', parameters: {bot},
       contextMenu: 'off',
       autoplay: 'on', unmuteOverlay: 'hidden', preferredRenderer: 'wgpu-webgl',
       logLevel: 'warn', openUrlMode: 'deny', allowScriptAccess: false,
@@ -162,6 +162,7 @@
       ]
     });
     player.ruffle().traceObserver = message => {
+      if (message.startsWith('openrotmg-spectator:cursor:')) {console.debug(message); return;}
       if (message.startsWith('openrotmg-spectator:inspect:')) {void inspect(message); return;}
       if (message.startsWith('openrotmg-spectator:source:')) {
         const value = /^openrotmg-spectator:source:(-?\d+)$/.exec(message);

@@ -30,6 +30,7 @@ def transform(root):
     for name, type_, value in [('cursorAttached', 'Boolean', 'False()'),
                                ('cursorReady', 'Boolean', 'False()'),
                                ('cursorHasTick', 'Boolean', 'False()'),
+                               ('cursorTracePending', 'Boolean', 'False()'),
                                ('cursorTime', 'int', 'Integer(0)'),
                                ('cursorShape', 'Object', 'Null()')]:
         slot(game, name, type_, value)
@@ -86,6 +87,7 @@ def transform(root):
     {set_('cursorAttached', 'pushfalse')}
     {set_('cursorReady', 'pushfalse')}
     {set_('cursorHasTick', 'pushfalse')}
+    {set_('cursorTracePending', 'pushfalse')}
     {get('cursorShape')}
     iffalse done
     {get('cursorShape')}
@@ -140,6 +142,7 @@ def transform(root):
     consume += f'''{set_('cursorTime', f'findpropstrict {q("getTimer", "flash.utils")}\ncallproperty {q("getTimer", "flash.utils")}, 0')}
     {set_('cursorReady', 'pushtrue')}
     {set_('cursorHasTick', 'pushtrue')}
+    {set_('cursorTracePending', 'pushtrue')}
     returnvoid
     stale:
     {set_('cursorReady', 'pushfalse')}
@@ -256,15 +259,25 @@ def transform(root):
                           ('lineTo', 9, 0), ('moveTo', 0, -9), ('lineTo', 0, -3),
                           ('moveTo', 0, 3), ('lineTo', 0, 9)]:
         draw += f'getlocal 4\npushbyte {x}\npushbyte {y}\ncallpropvoid {q(method)}, 2\n'
-    draw += f'''getlocal1
+    draw += f'''{get('cursorTracePending')}
+    iffalse done
+    getlocal1
     {get('spectatorFrameTime')}
     subtract
     pushshort 1000
     iflt done
+    {get('map_')}
+    findpropstrict {q('Point', 'flash.geom')}
+    {get('x', 3)}
+    {get('y', 3)}
+    constructprop {q('Point', 'flash.geom')}, 2
+    callproperty {q('localToGlobal')}, 1
+    setlocal3
+    {set_('cursorTracePending', 'pushfalse')}
     findpropstrict {q('trace')}
-    pushstring "openrotmg-cursor:draw"
+    pushstring "openrotmg-spectator:cursor"
     '''
-    for name, local in [(name, 0) for name, _, _ in fields] + [('x', 3), ('y', 3)]:
+    for name, local in [(name, 0) for name, _, _ in fields[:-1]] + [('x', 3), ('y', 3), ('cursorFire', 0)]:
         draw += f'pushstring ":"\nadd\n{get(name, local)}\nadd\n'
     draw += f'''callpropvoid {q('trace')}, 1
     done:

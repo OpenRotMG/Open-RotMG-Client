@@ -71,7 +71,7 @@ class CursorInstructions:
                 obj = stack.pop()
                 if op == 'constructprop':
                     if prop == 'Error': raise ValueError(*values)
-                    if prop == 'Vector3D': result = dict(zip(['x', 'y', 'z'], values))
+                    if prop in ['Vector3D', 'Point']: result = dict(zip(['x', 'y', 'z'], values))
                     elif prop == 'Shape':
                         graphics = {name: (lambda *v, name=name: self.lines.append((name, v)))
                                     for name in ['clear', 'lineStyle', 'drawCircle', 'moveTo', 'lineTo']}
@@ -188,7 +188,8 @@ class CursorTests(unittest.TestCase):
             # Nontrivial rotated/translated camera: must use native matrix, not guessed CSS scale.
             return {'x': 50 * point['y'] + 170, 'y': -50 * point['x'] + 90}
         player = {'objectId_': 11, '_-aY': 10}
-        world = {'player_': player, 'goDict_': {11: player}, 'addChild': children.append}
+        world = {'player_': player, 'goDict_': {11: player}, 'addChild': children.append,
+                 'localToGlobal': lambda point: {'x': point['x'] + 300, 'y': point['y'] + 325}}
         player['map_'] = world
         self.game.update(map_=world, spectatorFrameTime=0,
                          **{'_-on': {'wToS_': {'transformVector': project},
@@ -215,9 +216,16 @@ class CursorTests(unittest.TestCase):
         self.assertFalse(draw()['visible'])
         self.consume(tick=4)
         self.assertTrue(draw()['visible'])
-        self.assertTrue(self.vm.traces[-1].startswith('openrotmg-cursor:draw:'))
+        self.assertTrue(self.vm.traces[-1].startswith('openrotmg-spectator:cursor:'))
         self.assertEqual(list(map(float, self.vm.traces[-1].split(':')[2:])),
-                         [11, 7, 4, 2.25, -3.5, 1, -5, -22.5])
+                         [11, 7, 4, 2.25, -3.5, 295, 302.5, 1])
+        count = len(self.vm.traces)
+        draw()
+        self.assertEqual(len(self.vm.traces), count, 'no second trace without a new cursor packet')
+        self.consume(tick=5)
+        self.game['spectatorFrameTime'] = self.vm.now
+        draw()
+        self.assertEqual(len(self.vm.traces), count, 'new packets do not bypass the1Hz trace limit')
         player['_-aY'] = 0
         self.assertFalse(draw()['visible'])
         self.assertFalse(self.game['cursorAttached'])

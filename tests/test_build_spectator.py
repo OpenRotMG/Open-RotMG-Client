@@ -289,7 +289,9 @@ class SpectatorBuildTests(unittest.TestCase):
             for field in ['wToS_', 'transformVector', '_-FL', 'contains', 'drawCircle', 'lineStyle', 'goDict_', '_-aY']:
                 self.assertIn(spectator.q(field), cursor)
             self.assertNotIn(spectator.q('angleRad_'), cursor)
-            self.assertIn('openrotmg-cursor:draw', cursor)
+            self.assertIn('openrotmg-spectator:cursor', cursor)
+            self.assertIn(spectator.q('localToGlobal'), cursor)
+            self.assertIn(spectator.q('cursorTracePending'), cursor)
             self.assertIn('pushshort           1000', cursor)
             initialize = method('com/company/assembleegameclient/game/GameSprite.class.asasm', 'initialize')
             self.assertNotIn(spectator.q('mui_'), initialize)
