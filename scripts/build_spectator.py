@@ -90,6 +90,15 @@ def status(state, error=''):
     callpropvoid {q('trace')}, 1'''
 
 
+def source_status(state, owner):
+    return f'''findpropstrict {q('trace')}
+    pushstring "openrotmg-spectator:{state}:"
+    {owner}
+    getproperty {q('spectatorSource')}
+    add
+    callpropvoid {q('trace')}, 1'''
+
+
 def transform(root):
     web = root / 'WebMain.class.asasm'
     network = root / 'com/company/assembleegameclient/net/_-1f.class.asasm'
@@ -354,7 +363,7 @@ def transform(root):
     getlocal0
     getlocal2
     setproperty {q('spectatorFrameTime')}
-    {status('frame')}
+    {source_status('frame', 'getlocal0')}
     findpropstrict {q('trace')}
     pushstring "openrotmg-spectator:source:"
     getlocal0
@@ -366,7 +375,7 @@ def transform(root):
     getlocal2
     setproperty {q('lastUpdate_')}
     returnvoid''')
-    replace_method(network, '_-02H', status('tick'), suffix=True)
+    replace_method(network, '_-02H', source_status('tick', f"getlocal0\ngetproperty {q('gs_')}"), suffix=True)
     replace_method(network, '_-of', f'getlocal0\npushscope\n{status("disconnected")}\nreturnvoid')
     replace_method(network, 'onError', f'getlocal0\npushscope\n{status("error", "Native socket error")}\nreturnvoid')
     replace_method(network, '_-nc', f'''getlocal0
@@ -479,6 +488,11 @@ def spectator_interactions(root):
     setlocal2
     getlocal1
     iffalse compare
+    getlocal0
+    getproperty {q('charList_')}
+    getlocal1
+    getproperty {q('name_')}
+    setproperty {q('name_')}
     getlocal1
     getproperty {q('objectId_')}
     setlocal2
