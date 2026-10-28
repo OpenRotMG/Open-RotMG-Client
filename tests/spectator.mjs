@@ -183,8 +183,22 @@ test('outside-menu capture runs before the canvas native trace, not after its lo
   assert.equal(view.messages.at(-1).type, 'openrotmg-bot-select');
 });
 
-test('human, malformed, private-field and mismatched resolver replies never offer perspective', async () => {
-  for (const response of [reply(null,404), reply(null,403), reply({bot:'Biceps',player:23,source:11}),
+test('unwatchable players show disabled cannot-spy feedback without changing the live view', async () => {
+  let response = reply(null,404);
+  const view = await launch({resolve: () => response});view.live();await view.inspect();
+  assert.equal(view.menu.hidden, false);
+  assert.equal(view.button.disabled, true);
+  assert.equal(view.button.textContent, 'Player (cannot spy)');
+  assert.equal(view.errors.length, 0);
+  assert.equal(view.messages.at(-1).status, 'live');
+  await view.click();assert.ok(view.messages.every(message => message.type !== 'openrotmg-bot-select'));
+  response = reply({bot:'Biceps',player:22,source:11});await view.inspect();
+  assert.equal(view.button.disabled, false);assert.equal(view.button.textContent, 'View perspective');
+  await view.click();assert.equal(view.messages.at(-1).target, 'Biceps');
+});
+
+test('malformed, private-field and mismatched resolver replies never offer perspective', async () => {
+  for (const response of [reply(null,403), reply({bot:'Biceps',player:23,source:11}),
     reply({bot:'Biceps',player:22,source:12}), reply({bot:'../',player:22,source:11}),
     reply({bot:'Biceps',player:22,source:11,account:'private'}), reply('x'.repeat(1100)),
     {ok:true,status:200,text:async () => '{'}]) {

@@ -7,6 +7,7 @@
   const initializingAt = performance.now();
   let state, failure, connectedAt = null, lastFrame = null, lastTick = null;
   const menu = document.querySelector('#perspective');
+  const button = menu.querySelector('button');
   const inspectStatus = document.querySelector('#inspect-status');
   const client = document.querySelector('#client');
   const profile = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(value);
@@ -19,6 +20,8 @@
     window.clearTimeout(menuTimer);
     selected = null;
     menu.hidden = true;
+    button.disabled = false;
+    button.textContent = 'View perspective';
     inspectStatus.textContent = '';
   };
   const lookupError = (error, current) => {
@@ -70,8 +73,10 @@
     const current = generation;
     try {
       const result = await lookup(from, target, current);
-      if (!result || current !== generation) return;
-      selected = {target: result.bot, player: target, source: from, generation: current};
+      if (current !== generation) return;
+      selected = result ? {target: result.bot, player: target, source: from, generation: current} : null;
+      button.disabled = !result;
+      button.textContent = result ? 'View perspective' : 'Player (cannot spy)';
       menu.hidden = false;
       const rect = client.getBoundingClientRect();
       menu.style.left = `${Math.max(rect.left, Math.min(rect.left + x / 800 * rect.width, rect.right - menu.offsetWidth))}px`;
@@ -79,7 +84,7 @@
       menuTimer = window.setTimeout(clearInspect, 5000);
     } catch (error) {lookupError(error, current);}
   };
-  menu.querySelector('button').addEventListener('click', async () => {
+  button.addEventListener('click', async () => {
     const choice = selected;
     const valid = choice && choice.source === source && choice.generation === generation && state === 'live';
     clearInspect();
