@@ -26,7 +26,8 @@
     // Game input should not open emulator controls: https://github.com/ruffle-rs/ruffle/blob/89a7049965f3090e706265670df309a5128233ac/web/packages/core/src/public/config/load-options.ts#L160-L176
     contextMenu:mode === 'game' ? 'off' : 'on',
     autoplay:'on',unmuteOverlay:'hidden',preferredRenderer:'wgpu-webgl',
-    logLevel:'info',openUrlMode:'deny',allowScriptAccess:false,
+    // Get Gold uses navigateToURL; require consent instead of silently denying it: https://github.com/ruffle-rs/ruffle/blob/89a7049965f3090e706265670df309a5128233ac/web/src/navigator.rs
+    logLevel:'info',openUrlMode:mode === 'game' ? 'confirm' : 'deny',allowScriptAccess:false,
     socketProxy:[{host:'127.0.0.1',port:2050,proxyUrl:socketEndpoint.href}],
     urlRewriteRules:[
       [/^https?:\/\/127\.0\.0\.1:8080\/(?=(?:char|account|fame|guild|picture)\/)/,accountEndpoint],
