@@ -168,13 +168,14 @@ test('missing assets, SWF failure, socket error, runtime error and no draw fail 
   view.advance(15000);
   assert.equal(view.messages.at(-1).status, 'error');
   assert.match(view.messages.at(-1).error, /did not draw/);
+  const first=view.messages.at(-1).error;
   view.native('frame');
   assert.equal(view.messages.at(-1).status, 'error');
-  view.native('connecting');
-  view.native('error', 'Admission denied');
-  assert.equal(view.messages.at(-1).error, 'Admission denied');
-  view.events.unhandledrejection({reason: new Error('Runtime failure')});
-  assert.equal(view.messages.at(-1).error, 'Runtime failure');
+  view.native('connecting');view.native('error', 'Admission denied');
+  view.events.unhandledrejection({reason: new Error('Later teardown failure')});
+  assert.equal(view.messages.at(-1).error,first);
+  const runtime=await launch();runtime.events.unhandledrejection({reason:new Error('Runtime failure')});
+  assert.equal(runtime.messages.at(-1).error,'Runtime failure');
 });
 
 test('native actor inspection resolves read-only, scales/clamps menu and posts exact parent selection', async () => {
@@ -365,6 +366,27 @@ test('an unavailable source remains switchable without reloading or accepting ol
   view.attached('Biceps',1,22,8);view.native('frame','22');view.native('tick','22');
   assert.equal(view.messages.at(-1).status,'live');assert.equal(view.messages.at(-1).bot,'Biceps');
   assert.deepEqual(view.counts(),{creates:1,loads:1});assert.equal(view.errors.length,0);
+});
+
+test('an unavailable view survives a rejected switch and can select another live source', async () => {
+  const view = await launch();view.live();view.control({type:'unavailable',bot:'Triceps',generation:0});view.advance(30000);
+  view.command('Biceps',1);view.control({type:'rejected',bot:'Triceps',generation:0,requested:1,error:'Bot is no longer online'});
+  assert.equal(view.messages.at(-1).status,'disconnected');assert.match(view.messages.at(-1).error,/offline/);
+  assert.match(view.inspectStatus.textContent,/no longer online/);view.advance(30000);
+  assert.equal(view.messages.at(-1).status,'disconnected');
+  view.command('Other',1);view.control({type:'selected',bot:'Other',generation:1});view.attached('Other',1,33,9);
+  view.native('frame','33');view.native('tick','33');assert.equal(view.messages.at(-1).status,'live');
+  assert.equal(view.messages.at(-1).bot,'Other');assert.deepEqual(view.counts(),{creates:1,loads:1});
+});
+
+test('native teardown callbacks cannot replace the original fatal error', async () => {
+  const view = await launch();view.live();view.command('Biceps',1);view.advance(8000);
+  const message=view.status.textContent;assert.match(message,/acknowledged/);
+  for(const status of ['disconnected','connecting','frame','tick','error']) {
+    view.native(status);assert.equal(view.status.textContent,message);assert.equal(view.messages.at(-1).status,'error');
+  }
+  view.events.unhandledrejection({reason:new Error('Later teardown failure')});
+  assert.equal(view.status.textContent,message);assert.deepEqual(view.counts(),{creates:1,loads:1});
 });
 
 test('unacknowledged switches, mismatched replies and private control fields fail without reload', async () => {

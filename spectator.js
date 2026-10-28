@@ -13,7 +13,7 @@
   const profile = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(value);
   const actor = value => Number.isInteger(value) && value >= 0 && value <= 2147483647;
   let source = null, generation = 0, request, menuTimer, selected, lookups = [];
-  let control, parentOrigin = null, watchGeneration = 0, bound = null, pending = null, leaving = false, loaded = false;
+  let control, parentOrigin = null, watchGeneration = 0, bound = null, pending = null, leaving = false, loaded = false, unavailable = false;
   const version = value => Number.isInteger(value) && value >= 0 && value <= 4294967295;
   const shape = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).sort().join(',') === keys;
@@ -126,6 +126,7 @@
     announce();
   };
   const fail = error => {
+    if (state === 'error') return;
     publish('error', String(error.message || error));
     control?.close(1000, 'Viewer failed');
     console.error(error);
@@ -145,6 +146,10 @@
       if (now - pending.at >= 8000) fail(new Error('Perspective switch was not acknowledged within 8 seconds'));
       return;
     }
+    if (unavailable) {
+      publish('disconnected', 'Bot is offline or has no living character');
+      return;
+    }
     if (state === 'disconnected') return;
     if (lastFrame !== null && lastTick !== null) {
       publish(now - lastFrame < 5000 && now - lastTick < 5000 ? 'live' : 'stale');
@@ -153,6 +158,7 @@
     }
   };
   const nativeStatus = (status, error) => {
+    if (state === 'error') return;
     if (status === 'connecting') {
       clearInspect();
       source = bound = null;
@@ -234,24 +240,24 @@
           post({type: 'openrotmg-bot-ready', bot, generation: 0});announce();resolve(data.view);
         } else if (shape(data, 'bot,generation,type') && data.type === 'selected' && profile(data.bot) && version(data.generation)) {
           if (!pending || data.generation !== pending.generation || data.bot !== pending.bot) throw new Error('Unexpected perspective selection');
-          bot = data.bot;watchGeneration = data.generation;pending = bound = source = null;
+          bot = data.bot;watchGeneration = data.generation;pending = bound = source = null;unavailable = false;
           lastFrame = lastTick = null;connectedAt = loaded ? performance.now() : null;state = undefined;
           post({type: 'openrotmg-bot-selected', bot, generation: watchGeneration});publish('connecting');
         } else if (shape(data, 'bot,generation,type') && data.type === 'unavailable' && profile(data.bot) && version(data.generation)) {
           if (data.generation !== watchGeneration || data.bot !== bot) return;
-          bound = source = lastFrame = lastTick = null;
+          bound = source = lastFrame = lastTick = null;unavailable = true;
           publish('disconnected', 'Bot is offline or has no living character');
         } else if (shape(data, 'bot,character,generation,player,type') && data.type === 'attached' &&
             profile(data.bot) && version(data.generation) && actor(data.player) && data.player > 0 && actor(data.character) && data.character > 0) {
           if (data.generation !== watchGeneration || data.bot !== bot) return;
           bound = {player: data.player, character: data.character};source = null;
           lastFrame = lastTick = null;
-          if (loaded && (connectedAt === null || state === 'disconnected')) connectedAt = performance.now();
-          publish('connecting');
+          if (loaded && (connectedAt === null || unavailable || state === 'disconnected')) connectedAt = performance.now();
+          unavailable = false;publish('connecting');
         } else if (shape(data, 'bot,error,generation,requested,type') && data.type === 'rejected' && data.bot === bot &&
             data.generation === watchGeneration && pending && data.requested === pending.generation && typeof data.error === 'string' && data.error.trim()) {
           pending = null;post({type: 'openrotmg-bot-rejected', bot, generation: watchGeneration, requested: data.requested, error: data.error});
-          lookupError(new Error(data.error), generation);refresh();
+          refresh();lookupError(new Error(data.error), generation);
         } else throw new Error('Invalid viewer control message');
       } catch (error) {failed(error);}
     };
