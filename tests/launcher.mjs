@@ -19,7 +19,7 @@ for (const [page, mode, movie] of [['index.html', 'game', '/client.swf'], ['draw
     assert.equal(options.url, movie);
     assert.equal(options.contextMenu, mode === 'game' ? 'off' : 'on');
     assert.equal(options.allowScriptAccess, false);
-    assert.equal(options.openUrlMode, 'deny');
+    assert.equal(options.openUrlMode, mode === 'game' ? 'confirm' : 'deny');
     assert.equal(options.socketProxy[0].proxyUrl, 'ws://127.0.0.1:18923/game');
     assert.equal(options.urlRewriteRules[0][1], 'http://127.0.0.1:18923/legacy-api/');
     assert.equal(options.urlRewriteRules[1][1], 'http://127.0.0.1:18923/sfx/');
