@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 const script = await readFile(new URL('../spectator.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const reply = (body, status = 200) => ({ok: status === 200, status, text: async () => JSON.stringify(body)});
-async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError, loadDelay = 0, resolve = () => reply({bot:'Biceps', player:22, source:11})} = {}) {
+async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError, loadDelay = 0, duringLoadSwitch = false, resolve = () => reply({bot:'Biceps', player:22, source:11})} = {}) {
   let now = 0, options, refresh, nextTimer = 0, control, creates = 0, loads = 0;
   const sent = [], sockets = [];
   class WebSocket {
@@ -28,6 +28,10 @@ async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError
   const client = {append() {}, getBoundingClientRect: () => ({left:40, top:20, width:400, height:300, right:440, bottom:320})};
   const api = {load: async value => {
     options = value;loads++;
+    if (duringLoadSwitch) {
+      events.message({origin:'https://site.example',source:window.parent,data:{type:'openrotmg-bot-watch',bot:'Biceps',generation:1,target:{kind:'bot',bot:'Biceps'}}});
+      control.message({type:'selected',bot:'Biceps',generation:1});
+    }
     if (loadDelay) {now += loadDelay;refresh();}
     if (loadError) throw new Error(loadError);
   }}, player = {ruffle: () => api};
@@ -134,6 +138,15 @@ test('cold renderer initialization is bounded separately from the unchanged nati
   const stuck = await launch({loadDelay: 60000});
   assert.equal(stuck.messages.at(-1).status, 'error');
   assert.match(stuck.messages.at(-1).error, /renderer.*initialize.*60 seconds/i);
+  const late = await launch();late.advance(14000);late.attached();late.advance(1000);
+  assert.equal(late.messages.at(-1).status,'error','attachment metadata must not extend the native draw deadline');
+});
+
+test('switching during cold initialization does not start the native deadline before the renderer is ready', async () => {
+  const view = await launch({loadDelay:19000,duringLoadSwitch:true});
+  assert.equal(view.messages.at(-1).status,'connecting');assert.equal(view.messages.at(-1).bot,'Biceps');assert.equal(view.errors.length,0);
+  view.advance(14999);assert.equal(view.messages.at(-1).status,'connecting');
+  view.advance(1);assert.equal(view.messages.at(-1).status,'error');assert.match(view.messages.at(-1).error,/within 15 seconds/);
 });
 
 test('steady native rendering sends live heartbeats without inventing state changes', async () => {
@@ -343,6 +356,15 @@ test('rejected switches preserve the current view and surface the actual rejecti
   assert.equal(view.messages.at(-1).status,'live');assert.equal(view.messages.at(-1).bot,'Triceps');
   assert.ok(view.messages.some(message=>message.type==='openrotmg-bot-rejected' && message.requested===1));
   view.command('Other',1);assert.equal(view.sent.length,2);assert.deepEqual(view.counts(),{creates:1,loads:1});
+});
+
+test('an unavailable source remains switchable without reloading or accepting old native heartbeats', async () => {
+  const view = await launch();view.live();view.control({type:'unavailable',bot:'Triceps',generation:0});
+  view.live();view.advance(30000);assert.equal(view.messages.at(-1).status,'disconnected');
+  view.command('Biceps',1);view.control({type:'selected',bot:'Biceps',generation:1});
+  view.attached('Biceps',1,22,8);view.native('frame','22');view.native('tick','22');
+  assert.equal(view.messages.at(-1).status,'live');assert.equal(view.messages.at(-1).bot,'Biceps');
+  assert.deepEqual(view.counts(),{creates:1,loads:1});assert.equal(view.errors.length,0);
 });
 
 test('unacknowledged switches, mismatched replies and private control fields fail without reload', async () => {

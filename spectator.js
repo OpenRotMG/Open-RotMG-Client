@@ -13,7 +13,7 @@
   const profile = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(value);
   const actor = value => Number.isInteger(value) && value >= 0 && value <= 2147483647;
   let source = null, generation = 0, request, menuTimer, selected, lookups = [];
-  let control, parentOrigin = null, watchGeneration = 0, bound = null, pending = null, leaving = false;
+  let control, parentOrigin = null, watchGeneration = 0, bound = null, pending = null, leaving = false, loaded = false;
   const version = value => Number.isInteger(value) && value >= 0 && value <= 4294967295;
   const shape = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).sort().join(',') === keys;
@@ -137,6 +137,10 @@
   const refresh = () => {
     if (state === 'error') return;
     const now = performance.now();
+    if (!loaded) {
+      if (now - initializingAt >= 60000) fail(new Error('Native renderer did not initialize within 60 seconds'));
+      return;
+    }
     if (pending) {
       if (now - pending.at >= 8000) fail(new Error('Perspective switch was not acknowledged within 8 seconds'));
       return;
@@ -144,16 +148,15 @@
     if (state === 'disconnected') return;
     if (lastFrame !== null && lastTick !== null) {
       publish(now - lastFrame < 5000 && now - lastTick < 5000 ? 'live' : 'stale');
-    } else if (connectedAt === null ? now - initializingAt >= 60000 : now - connectedAt >= 15000) {
-      fail(new Error(connectedAt === null ? 'Native renderer did not initialize within 60 seconds'
-        : 'Native view did not draw a bot and receive a tick within 15 seconds'));
+    } else if (now - connectedAt >= 15000) {
+      fail(new Error('Native view did not draw a bot and receive a tick within 15 seconds'));
     }
   };
   const nativeStatus = (status, error) => {
     if (status === 'connecting') {
       clearInspect();
       source = bound = null;
-      connectedAt = performance.now();
+      connectedAt = loaded ? performance.now() : null;
       lastFrame = lastTick = null;
       publish('connecting');
     } else if (status === 'frame' || status === 'tick') {
@@ -183,13 +186,17 @@
   }, {once: true});
   const switchView = message => {
     const target = message.target;
-    if (!profile(message.bot) || !version(message.generation) || message.generation !== watchGeneration + 1 || pending ||
-        !(shape(target, 'bot,kind') && target.kind === 'bot' && target.bot === message.bot ||
-          shape(target, 'kind,source,target') && target.kind === 'player' && bound &&
-          target.source === source && source === bound.player && actor(target.target) && target.target > 0 && target.target !== source)) return;
+    if (!profile(message.bot) || !version(message.generation) || message.generation !== watchGeneration + 1 || pending) return;
+    if (!(shape(target, 'bot,kind') && target.kind === 'bot' && target.bot === message.bot ||
+        shape(target, 'kind,source,target') && target.kind === 'player' && bound &&
+        target.source === source && source === bound.player && actor(target.target) && target.target > 0 && target.target !== source)) {
+      const error = 'Perspective source or target changed; inspect again';
+      post({type: 'openrotmg-bot-rejected', bot, generation: watchGeneration, requested: message.generation, error});
+      lookupError(new Error(error), generation);announce();return;
+    }
     if (state === 'error' || control?.readyState !== WebSocket.OPEN) throw new Error('Viewer control is not available');
     if (message.bot === bot) return;
-    pending = {bot: message.bot, generation: message.generation, at: performance.now()};
+    pending = {bot: message.bot, generation: message.generation, at: loaded ? performance.now() : null};
     publish('connecting');
     control.send(JSON.stringify({generation: message.generation, target}));
   };
@@ -228,13 +235,19 @@
         } else if (shape(data, 'bot,generation,type') && data.type === 'selected' && profile(data.bot) && version(data.generation)) {
           if (!pending || data.generation !== pending.generation || data.bot !== pending.bot) throw new Error('Unexpected perspective selection');
           bot = data.bot;watchGeneration = data.generation;pending = bound = source = null;
-          lastFrame = lastTick = null;connectedAt = performance.now();state = undefined;
+          lastFrame = lastTick = null;connectedAt = loaded ? performance.now() : null;state = undefined;
           post({type: 'openrotmg-bot-selected', bot, generation: watchGeneration});publish('connecting');
+        } else if (shape(data, 'bot,generation,type') && data.type === 'unavailable' && profile(data.bot) && version(data.generation)) {
+          if (data.generation !== watchGeneration || data.bot !== bot) return;
+          bound = source = lastFrame = lastTick = null;
+          publish('disconnected', 'Bot is offline or has no living character');
         } else if (shape(data, 'bot,character,generation,player,type') && data.type === 'attached' &&
             profile(data.bot) && version(data.generation) && actor(data.player) && data.player > 0 && actor(data.character) && data.character > 0) {
           if (data.generation !== watchGeneration || data.bot !== bot) return;
           bound = {player: data.player, character: data.character};source = null;
-          lastFrame = lastTick = null;connectedAt = performance.now();publish('connecting');
+          lastFrame = lastTick = null;
+          if (loaded && (connectedAt === null || state === 'disconnected')) connectedAt = performance.now();
+          publish('connecting');
         } else if (shape(data, 'bot,error,generation,requested,type') && data.type === 'rejected' && data.bot === bot &&
             data.generation === watchGeneration && pending && data.requested === pending.generation && typeof data.error === 'string' && data.error.trim()) {
           pending = null;post({type: 'openrotmg-bot-rejected', bot, generation: watchGeneration, requested: data.requested, error: data.error});
@@ -264,6 +277,8 @@
     });
     if (performance.now() - initializingAt >= 60000) throw new Error('Native renderer did not initialize within 60 seconds');
     // Cold WASM/GPU startup is not a native connection attempt; its own bounded deadline remains above.
+    loaded = true;
+    if (pending?.at === null) pending.at = performance.now();
     connectedAt ??= performance.now();
     player.ruffle().traceObserver = message => {
       if (message.startsWith('openrotmg-spectator:cursor:') || message.startsWith('openrotmg-spectator:compose:')) {console.debug(message); return;}
