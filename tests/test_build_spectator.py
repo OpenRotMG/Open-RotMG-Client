@@ -248,6 +248,8 @@ class SpectatorBuildTests(unittest.TestCase):
             for field in ['readInt', 'readUnsignedInt', 'readFloat', 'readUnsignedByte', 'readUTF', 'isFinite']:
                 self.assertIn(spectator.q(field), packet)
             self.assertIn('openrotmg-spectator:tick:', tick)
+            self.assertIn(spectator.q('gs_'), tick)
+            self.assertIn(spectator.q('spectatorSource'), tick)
             notification_start = net.index('  trait method ' + spectator.private('_-Lx', spectator.NET + ':_-1f#0'))
             notification = net[notification_start:net.index('  end ; trait', notification_start)]
             self.assertNotIn('openrotmg-spectator:tick:', notification)
@@ -282,6 +284,14 @@ class SpectatorBuildTests(unittest.TestCase):
                 start = re.search(r'(?m)^  trait method [^\n]*, "' + re.escape(name) + r'"\)', text).start()
                 return text[start:text.index('  end ; trait', start)]
 
+            bind = method('com/company/assembleegameclient/game/GameSprite.class.asasm', 'spectatorBind')
+            self.assertIn('getproperty         ' + spectator.q('charList_'), bind)
+            self.assertIn('getproperty         ' + spectator.q('name_'), bind)
+            self.assertLess(bind.index('setproperty         ' + spectator.q('name_')), bind.index('ifeq'))
+            frame = method('com/company/assembleegameclient/game/GameSprite.class.asasm', 'onEnterFrame')
+            self.assertLess(frame.index(spectator.q('spectatorBind')), frame.index(spectator.q('_-V1')))
+            self.assertIn('openrotmg-spectator:frame:', frame)
+            self.assertIn(spectator.q('spectatorSource'), frame[frame.index('openrotmg-spectator:frame:'):])
             net_path = 'com/company/assembleegameclient/net/_-1f.class.asasm'
             game_path = 'com/company/assembleegameclient/game/GameSprite.class.asasm'
             attach = method(net_path, '_-cw')

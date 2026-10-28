@@ -1,7 +1,7 @@
 (async () => {
   const match = /^\/api\/bots\/([^/]+)\/view$/.exec(location.pathname);
   if (!match) throw new Error('Expected /api/bots/{name}/view');
-  const bot = decodeURIComponent(match[1]);
+  let bot = decodeURIComponent(match[1]);
   if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(bot)) throw new Error('Invalid bot name');
   const label = document.querySelector('#status');
   const initializingAt = performance.now();
@@ -13,6 +13,17 @@
   const profile = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(value);
   const actor = value => Number.isInteger(value) && value >= 0 && value <= 2147483647;
   let source = null, generation = 0, request, menuTimer, selected, lookups = [];
+  let control, parentOrigin = null, watchGeneration = 0, bound = null, pending = null, leaving = false;
+  const version = value => Number.isInteger(value) && value >= 0 && value <= 4294967295;
+  const shape = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === keys;
+  const post = message => window.parent.postMessage(message, parentOrigin);
+  const announce = () => {
+    const message = {bot, status: state, ...(failure ? {error: failure} : {})};
+    // Already-open site pages still consume the legacy public status during the rollout.
+    window.parent.postMessage({type: 'openrotmg-bot-view', ...message}, '*');
+    if (parentOrigin !== null) post({type: 'openrotmg-bot-state', generation: watchGeneration, ...message});
+  };
   const clearInspect = () => {
     generation++;
     request?.abort();
@@ -94,7 +105,13 @@
       const result = await lookup(choice.source, choice.player, current);
       if (current !== generation) return;
       if (!result || result.bot !== choice.target) throw new Error('Perspective no longer available');
-      window.parent.postMessage({type: 'openrotmg-bot-select', bot, target: choice.target}, '*');
+      const target = {kind: 'player', source: choice.source, target: choice.player};
+      if (window.parent === window) switchView({bot: choice.target, generation: watchGeneration + 1, target});
+      else {
+        window.parent.postMessage({type: 'openrotmg-bot-select', bot, target: choice.target}, '*');
+        post({type: 'openrotmg-bot-choice', bot, generation: watchGeneration,
+          target: choice.target, source: choice.source, player: choice.player});
+      }
     } catch (error) {lookupError(error, current);}
   });
   window.addEventListener('pointerdown', event => {if (!menu.contains(event.target)) clearInspect();}, true);
@@ -106,10 +123,11 @@
     failure = error;
     if (status !== 'live') clearInspect();
     label.textContent = status === 'live' ? '' : `${status}${error ? `: ${error}` : ''}`;
-    window.parent.postMessage({type: 'openrotmg-bot-view', bot, status, ...(error ? {error} : {})}, '*');
+    announce();
   };
   const fail = error => {
     publish('error', String(error.message || error));
+    control?.close(1000, 'Viewer failed');
     console.error(error);
   };
   window.addEventListener('error', event => fail(event.error || new Error(event.message)));
@@ -117,8 +135,13 @@
   publish('connecting');
   // Packet arrival alone is not rendering: require a completed native draw and a recent tick.
   const refresh = () => {
-    if (state === 'error' || state === 'disconnected') return;
+    if (state === 'error') return;
     const now = performance.now();
+    if (pending) {
+      if (now - pending.at >= 8000) fail(new Error('Perspective switch was not acknowledged within 8 seconds'));
+      return;
+    }
+    if (state === 'disconnected') return;
     if (lastFrame !== null && lastTick !== null) {
       publish(now - lastFrame < 5000 && now - lastTick < 5000 ? 'live' : 'stale');
     } else if (connectedAt === null ? now - initializingAt >= 60000 : now - connectedAt >= 15000) {
@@ -129,12 +152,18 @@
   const nativeStatus = (status, error) => {
     if (status === 'connecting') {
       clearInspect();
-      source = null;
+      source = bound = null;
       connectedAt = performance.now();
       lastFrame = lastTick = null;
       publish('connecting');
     } else if (status === 'frame' || status === 'tick') {
-      if (status === 'frame') lastFrame = performance.now();
+      const player = /^\d+$/.test(error) ? Number(error) : NaN;
+      if (pending || !bound || !actor(player) || player <= 0 || player !== bound.player) return;
+      if (status === 'frame') {
+        if (source !== player) clearInspect();
+        source = player;
+        lastFrame = performance.now();
+      }
       else lastTick = performance.now();
       refresh();
     } else if (status === 'disconnected') publish('disconnected');
@@ -145,20 +174,85 @@
   const interval = window.setInterval(() => {
     refresh();
     if (performance.now() - lastHeartbeat >= 5000 && state) {
-      window.parent.postMessage({type: 'openrotmg-bot-view', bot, status: state, ...(failure ? {error: failure} : {})}, '*');
+      announce();
       lastHeartbeat = performance.now();
     }
   }, 1000);
-  window.addEventListener('pagehide', () => {clearInspect(); window.clearInterval(interval);}, {once: true});
+  window.addEventListener('pagehide', () => {
+    leaving = true;clearInspect();window.clearInterval(interval);control?.close(1000, 'Viewer closed');
+  }, {once: true});
+  const switchView = message => {
+    const target = message.target;
+    if (!profile(message.bot) || !version(message.generation) || message.generation !== watchGeneration + 1 || pending ||
+        !(shape(target, 'bot,kind') && target.kind === 'bot' && target.bot === message.bot ||
+          shape(target, 'kind,source,target') && target.kind === 'player' && bound &&
+          target.source === source && source === bound.player && actor(target.target) && target.target > 0 && target.target !== source)) return;
+    if (state === 'error' || control?.readyState !== WebSocket.OPEN) throw new Error('Viewer control is not available');
+    if (message.bot === bot) return;
+    pending = {bot: message.bot, generation: message.generation, at: performance.now()};
+    publish('connecting');
+    control.send(JSON.stringify({generation: message.generation, target}));
+  };
+  window.addEventListener('message', event => {
+    if (parentOrigin === null || event.origin !== parentOrigin || event.source !== window.parent ||
+        !shape(event.data, 'bot,generation,target,type') || event.data.type !== 'openrotmg-bot-watch') return;
+    try {switchView(event.data);} catch (error) {fail(error);}
+  });
+  const openControl = () => new Promise((resolve, reject) => {
+    const url = new URL(`/api/bots/${encodeURIComponent(bot)}/control`, location.href);
+    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let ready = false;
+    const timer = window.setTimeout(() => reject(new Error('Viewer control did not initialize within 5 seconds')), 5000);
+    control = new WebSocket(url.href);
+    const failed = error => {
+      window.clearTimeout(timer);
+      if (ready) fail(error); else reject(error);
+    };
+    control.onerror = () => failed(new Error('Viewer control connection failed'));
+    control.onclose = event => {
+      if (!leaving && state !== 'error') failed(new Error(`Viewer control closed: ${event.reason || event.code}`));
+    };
+    control.onmessage = event => {
+      if (leaving || state === 'error') return;
+      try {
+        if (typeof event.data !== 'string' || event.data.length > 512) throw new Error('Invalid viewer control frame');
+        const data = JSON.parse(event.data);
+        if (!ready) {
+          if (!shape(data, 'bot,generation,parent_origin,type,view') || data.type !== 'ready' || data.bot !== bot || data.generation !== 0 ||
+              typeof data.view !== 'string' || !/^[a-f0-9]{32}$/.test(data.view) || typeof data.parent_origin !== 'string' ||
+              !['http:', 'https:'].includes(new URL(data.parent_origin).protocol) ||
+              new URL(data.parent_origin).origin !== data.parent_origin) throw new Error('Invalid viewer control initialization');
+          parentOrigin = window.parent === window ? new URL(location.href).origin : data.parent_origin;
+          ready = true;window.clearTimeout(timer);
+          post({type: 'openrotmg-bot-ready', bot, generation: 0});announce();resolve(data.view);
+        } else if (shape(data, 'bot,generation,type') && data.type === 'selected' && profile(data.bot) && version(data.generation)) {
+          if (!pending || data.generation !== pending.generation || data.bot !== pending.bot) throw new Error('Unexpected perspective selection');
+          bot = data.bot;watchGeneration = data.generation;pending = bound = source = null;
+          lastFrame = lastTick = null;connectedAt = performance.now();state = undefined;
+          post({type: 'openrotmg-bot-selected', bot, generation: watchGeneration});publish('connecting');
+        } else if (shape(data, 'bot,character,generation,player,type') && data.type === 'attached' &&
+            profile(data.bot) && version(data.generation) && actor(data.player) && data.player > 0 && actor(data.character) && data.character > 0) {
+          if (data.generation !== watchGeneration || data.bot !== bot) return;
+          bound = {player: data.player, character: data.character};source = null;
+          lastFrame = lastTick = null;connectedAt = performance.now();publish('connecting');
+        } else if (shape(data, 'bot,error,generation,requested,type') && data.type === 'rejected' && data.bot === bot &&
+            data.generation === watchGeneration && pending && data.requested === pending.generation && typeof data.error === 'string' && data.error.trim()) {
+          pending = null;post({type: 'openrotmg-bot-rejected', bot, generation: watchGeneration, requested: data.requested, error: data.error});
+          lookupError(new Error(data.error), generation);refresh();
+        } else throw new Error('Invalid viewer control message');
+      } catch (error) {failed(error);}
+    };
+  });
   try {
     if (!window.RufflePlayer) throw new Error('Ruffle assets unavailable');
+    const view = await openControl();
     const player = window.RufflePlayer.newest().createPlayer();
     client.append(player);
-    const socket = new URL(`/api/bots/${encodeURIComponent(bot)}/socket`, location.href);
+    const socket = new URL(`/api/bots/views/${view}/socket`, location.href);
     socket.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket.searchParams.set('cursor', '2');
     await player.ruffle().load({
-      url: '/api/bots/client.swf?v=503ad44414cbe1807afd11d8828296a84830adab30c666bf371871d917fd64ed', parameters: {bot},
+      url: '/api/bots/client.swf?v=06ba9e7f31be9c4b3b408d36000b1889cda03d68aecf11dbb83cc2a4b48cfed0', parameters: {bot},
       contextMenu: 'off',
       autoplay: 'on', unmuteOverlay: 'hidden', preferredRenderer: 'wgpu-webgl',
       logLevel: 'warn', openUrlMode: 'deny', allowScriptAccess: false,
@@ -179,7 +273,10 @@
         const next = value ? Number(value[1]) : NaN;
         if (!actor(next) && next !== -1) {clearInspect(); source = null; console.warn('Malformed native spectator source trace'); return;}
         if (source !== next) clearInspect();
-        source = next === -1 ? null : next;
+        if (next !== bound?.player) {
+          source = lastFrame = lastTick = null;
+          if (state !== 'error' && state !== 'disconnected') publish('connecting');
+        } else source = next;
         return;
       }
       const status = /^openrotmg-spectator:([a-z]+):(.*)$/s.exec(message);
