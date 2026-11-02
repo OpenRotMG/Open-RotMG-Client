@@ -1,4 +1,7 @@
 (async () => {
+  const graphicsHelp = 'WebGL 2 graphics are required. Enable hardware acceleration in your browser or desktop settings, update your graphics driver, then restart and try again.';
+  const probe = document.createElement('canvas').getContext('webgl2');
+  if (!probe || probe.isContextLost()) throw new Error(graphicsHelp);
   const player = window.RufflePlayer.newest().createPlayer();
   document.querySelector('#client').append(player);
   const heldKeys = new Map();
@@ -34,8 +37,13 @@
       [/^https?:\/\/realmofthemadgod\.appspot\.com\/sfx\//,audioEndpoint]
     ]
   });
+  // Ruffle 89a7049965f3090e706265670df309a5128233ac exposes no public renderer getter; preferredRenderer permits Canvas fallback.
+  const canvases = player.shadowRoot?.querySelectorAll('#container > canvas');
+  const context = canvases?.length === 1 ? canvases[0].getContext('webgl2') : null;
+  if (!context || context.isContextLost()) throw new Error(`Ruffle did not initialize a supported WebGL 2 renderer. ${graphicsHelp}`);
   document.querySelector('#status').textContent = '';
 })().catch(error => {
+  document.querySelector('#client').replaceChildren();
   document.querySelector('#status').textContent = String(error);
   console.error(error);
 });
