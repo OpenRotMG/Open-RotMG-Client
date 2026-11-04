@@ -1,0 +1,29 @@
+Subject: Reserve the WASM heap up front
+
+--- a/web/src/lib.rs
++++ b/web/src/lib.rs
+@@ -1440,5 +1440,24 @@
+         });
+     }));
+ 
++    reserve_heap();
++
+     tracing::info!("Ruffle WASM module has been initialized");
+ }
++
++/// dlmalloc grows WebAssembly memory a few pages at a time as its heap fills, and every
++/// `memory.grow` stalls the frame that triggered it. Growing once up front and freeing the block
++/// leaves it in the allocator's top chunk, so later allocations are carved from it instead.
++fn reserve_heap() {
++    const RESERVE: usize = 1 << 30;
++    let layout = std::alloc::Layout::from_size_align(RESERVE, 1).expect("valid layout");
++    // SAFETY: the layout is non-zero, and the block is freed with the same layout.
++    // `black_box` keeps the optimizer from eliding the unused allocation.
++    let block = std::hint::black_box(unsafe { std::alloc::alloc(layout) });
++    if block.is_null() {
++        tracing::warn!("Could not reserve {} MiB of heap", RESERVE >> 20);
++        return;
++    }
++    unsafe { std::alloc::dealloc(block, layout) };
++    tracing::info!("Reserved {} MiB of heap", RESERVE >> 20);
++}
