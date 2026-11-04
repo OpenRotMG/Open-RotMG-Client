@@ -28,7 +28,10 @@ async function setup() {
     window.addEventListener('keyup', event => { if (focused) delivered.push(event); });
   }});
   window.RufflePlayer = {newest: () => ({createPlayer: () => player})};
-  const document = {querySelector: selector => ({'#client': {dataset: {mode: 'game'}, append() {}}, '#status': {}})[selector]};
+  const canvas = {getContext: () => ({isContextLost: () => false})};
+  player.shadowRoot = {querySelectorAll: () => [canvas]};
+  const document = {createElement: () => canvas,
+    querySelector: selector => ({'#client': {dataset: {mode: 'game'}, append() {}}, '#status': {}})[selector]};
   await vm.runInNewContext(script, {window, document, KeyboardEvent, URL, location: {href:'http://localhost:8080/'}, console});
   const down = (code, key, extra = {}) => player.dispatchEvent({type:'keydown', code, key, ...extra});
   const up = (code, key) => {
