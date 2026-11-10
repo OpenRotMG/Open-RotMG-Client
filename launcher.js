@@ -18,10 +18,10 @@
   }, true);
   window.addEventListener('blur', releaseKeys);
   const accountEndpoint = new URL('/legacy-api/', location.href).href;
-  const audioEndpoint = new URL('/sfx/', location.href).href;
+  const audioEndpoint = new URL('sfx/', location.href).href;
   const socketEndpoint = new URL('/game', location.href);
   socketEndpoint.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const movies = {game: '/client.swf', editor: '/native-texture-editor.swf'};
+  const movies = {game: 'client.swf', editor: 'native-texture-editor.swf'};
   const mode = document.querySelector('#client').dataset.mode;
   if (!Object.hasOwn(movies, mode)) throw new Error(`Unknown client mode: ${mode}`);
   await player.ruffle().load({

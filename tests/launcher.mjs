@@ -12,7 +12,8 @@ const shadowRoot = {querySelectorAll: selector => {
   assert.equal(selector, '#container > canvas');
   return [webglCanvas];
 }};
-for (const [page, mode, movie] of [['index.html', 'game', '/client.swf'], ['draw.html', 'editor', '/native-texture-editor.swf']]) {
+for (const base of ['/', '/_runtime/'+'a'.repeat(64)+'/']) {
+for (const [page, mode, movie] of [['index.html', 'game', 'client.swf'], ['draw.html', 'editor', 'native-texture-editor.swf']]) {
   test(`${page} explicitly loads ${movie} through the shared protected launcher`, async () => {
     const html = await readFile(new URL(`../${page}`, import.meta.url), 'utf8');
     assert.ok(html.includes(`data-mode="${mode}"`));
@@ -23,16 +24,17 @@ for (const [page, mode, movie] of [['index.html', 'game', '/client.swf'], ['draw
     const player = {shadowRoot, addEventListener() {}, ruffle: () => ({load: async value => {options = value;}})};
     const nodes = {'#client': {dataset: {mode}, append() {}}, '#status': {}};
     await vm.runInNewContext(script, {window: {addEventListener() {}, RufflePlayer: {newest: () => ({createPlayer: () => player})}},
-      document: {createElement: () => webglCanvas, querySelector: key => nodes[key]}, URL, location: {href: `http://127.0.0.1:18923/${page}?url=https://evil.example/a.swf`}});
+      document: {createElement: () => webglCanvas, querySelector: key => nodes[key]}, URL, location: {href: `http://127.0.0.1:18923${base}${page}?url=https://evil.example/a.swf`}});
     assert.equal(nodes['#status'].textContent, '');
     assert.equal(options.preferredRenderer, 'wgpu-webgl');
     assert.equal(options.url, movie);
+    assert.equal(new URL(options.url, `http://127.0.0.1:18923${base}${page}`).pathname,base+movie);
     assert.equal(options.contextMenu, mode === 'game' ? 'off' : 'on');
     assert.equal(options.allowScriptAccess, false);
     assert.equal(options.openUrlMode, mode === 'game' ? 'confirm' : 'deny');
     assert.equal(options.socketProxy[0].proxyUrl, 'ws://127.0.0.1:18923/game');
     assert.equal(options.urlRewriteRules[0][1], 'http://127.0.0.1:18923/legacy-api/');
-    assert.equal(options.urlRewriteRules[1][1], 'http://127.0.0.1:18923/sfx/');
+    assert.equal(options.urlRewriteRules[1][1], `http://127.0.0.1:18923${base}sfx/`);
     const rewrite = url => options.urlRewriteRules.reduce((value, [pattern, replacement]) => value.replace(pattern, replacement), url);
     for (const protocol of ['http', 'https']) {
       for (const family of ['char/list', 'account/verify', 'fame/list', 'guild/listMembers', 'picture/save', 'picture/list', 'picture/get', 'picture/delete']) {
@@ -47,6 +49,7 @@ for (const [page, mode, movie] of [['index.html', 'game', '/client.swf'], ['draw
       'http://127.0.0.1:8080/pictures/get', 'http://127.0.0.1:8080/picture',
       'ftp://127.0.0.1:8080/picture/get', 'http://127.0.0.1:8080/?next=/picture/get']) assert.equal(rewrite(url), url);
   });
+}
 }
 test('missing, arbitrary and URL-like modes fail explicitly without loading any movie', async () => {
   for (const mode of [undefined, '', 'https://evil.example/movie.swf', '../client.swf']) {
