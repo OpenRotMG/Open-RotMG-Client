@@ -32,12 +32,16 @@ def build(work, output):
         patches[name] = hashlib.sha256(patch.read_bytes()).hexdigest()
         subprocess.run(['git', 'apply', '--check', str(patch)], cwd=source, check=True)
         subprocess.run(['git', 'apply', str(patch)], cwd=source, check=True)
+    desktop_patch = ROOT / 'desktop/patches/0001-inline-graphic-inspector.patch'
+    subprocess.run(['git', 'apply', '--check', str(desktop_patch)], cwd=source, check=True)
+    subprocess.run(['git', 'apply', str(desktop_patch)], cwd=source, check=True)
     env = {**os.environ, 'CARGO_PROFILE_RELEASE_LTO': 'false', 'CARGO_PROFILE_RELEASE_CODEGEN_UNITS': '16',
            'CARGO_PROFILE_RELEASE_OPT_LEVEL': '2', 'CARGO_PROFILE_RELEASE_DEBUG': '0', 'CARGO_PROFILE_RELEASE_INCREMENTAL': 'false'}
     subprocess.run(['cargo', 'build', '--locked', '--release', '-p', 'ruffle_desktop'], cwd=source, env=env, check=True)
     target = Path(env['CARGO_TARGET_DIR']) if 'CARGO_TARGET_DIR' in env else source / 'target'
     provenance = {'version': lock['version'], 'sourceCommit': lock['sourceCommit'], 'patches': patches,
-                  'rustVersion': lock['rustVersion'], 'client': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()}
+                  'rustVersion': lock['rustVersion'], 'desktopPatches': {desktop_patch.name: hashlib.sha256(desktop_patch.read_bytes()).hexdigest()},
+                  'client': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()}
     files = {'ruffle': (target / 'release/ruffle').read_bytes(), 'LICENSE.md': (source / 'LICENSE.md').read_bytes(),
              'README.md': (source / 'README.md').read_bytes(), 'openrotmg.json': (json.dumps(provenance, indent=2) + '\n').encode()}
     with output.open('wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0, filename='') as compressed, tarfile.open(fileobj=compressed, mode='w') as bundle:
