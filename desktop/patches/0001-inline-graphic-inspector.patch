@@ -1,0 +1,12 @@
+Subject: Inspect inline graphics in the desktop debugger
+
+--- a/core/src/debug_ui/display_object.rs
++++ b/core/src/debug_ui/display_object.rs
+@@ -843,6 +843,7 @@
+             LayoutContent::Text { .. } => "Text box",
+             LayoutContent::Bullet { .. } => "Bullet box",
+             LayoutContent::Drawing { .. } => "Drawing box",
++            LayoutContent::InlineGraphic { .. } => "Inline graphic",
+         };
+ 
+         let box_text = serde_json::to_string(
