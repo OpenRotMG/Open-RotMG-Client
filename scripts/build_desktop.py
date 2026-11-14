@@ -42,7 +42,7 @@ def build(work, output):
     provenance = {'version': lock['version'], 'sourceCommit': lock['sourceCommit'], 'patches': patches,
                   'rustVersion': lock['rustVersion'], 'desktopPatches': {desktop_patch.name: hashlib.sha256(desktop_patch.read_bytes()).hexdigest()},
                   'client': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()}
-    files = {'ruffle': (target / 'release/ruffle').read_bytes(), 'LICENSE.md': (source / 'LICENSE.md').read_bytes(),
+    files = {'ruffle': (target / 'release/ruffle_desktop').read_bytes(), 'LICENSE.md': (source / 'LICENSE.md').read_bytes(),
              'README.md': (source / 'README.md').read_bytes(), 'openrotmg.json': (json.dumps(provenance, indent=2) + '\n').encode()}
     with output.open('wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0, filename='') as compressed, tarfile.open(fileobj=compressed, mode='w') as bundle:
         for name, data in sorted(files.items()):
