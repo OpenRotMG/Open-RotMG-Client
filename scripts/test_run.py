@@ -38,7 +38,7 @@ class LauncherTests(unittest.TestCase):
 
 class ClientRoutingTests(unittest.TestCase):
     def test_loading_status_clears_without_gameplay_disclaimers(self):
-        html = (run.ROOT / "launcher.js").read_text()
+        html = (run.ROOT / "web/launcher.js").read_text()
         self.assertIn("document.querySelector('#status').textContent = '';", html)
         self.assertIn("document.querySelector('#status').textContent = String(error);", html)
         self.assertNotIn("historically verified game", html)
@@ -46,12 +46,12 @@ class ClientRoutingTests(unittest.TestCase):
         self.assertNotIn("External requests are blocked", html)
 
     def test_focus_loss_releases_held_game_keys(self):
-        result = subprocess.run(["node", "--test", str(run.ROOT / "tests/input.mjs"), str(run.ROOT / "tests/launcher.mjs")],
+        result = subprocess.run(["node", "--test", str(run.ROOT / "scripts/input.mjs"), str(run.ROOT / "scripts/launcher.mjs")],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_only_legacy_game_account_picture_api_urls_are_rewritten(self):
-        html = (run.ROOT / "launcher.js").read_text()
+        html = (run.ROOT / "web/launcher.js").read_text()
         pattern = re.search(r"\[/([^\n]+?)/,accountEndpoint\]", html).group(1).replace(r"\/", "/")
         for port in [8080, 18923, 65535]:
             origin = f"http://127.0.0.1:{port}"
@@ -77,8 +77,8 @@ class RufflePreparationTests(unittest.TestCase):
     def test_unsealed_runtime_rejects_before_network_cache_or_vendor_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            vendor = root / 'vendor'
-            vendor.mkdir()
+            vendor = root / 'web/vendor'
+            vendor.mkdir(parents=True)
             (vendor / 'ruffle.js').write_bytes(b'old selected runtime')
             (root / '.ruffle-0.7.1-openrotmg.9.zip').write_bytes(b'old private cache')
             before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
@@ -110,6 +110,7 @@ class RufflePreparationTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+        (self.root / 'web').mkdir()
         patches = self.root / 'ruffle/patches'
         patches.mkdir(parents=True)
         for name in run.LOCK['patches']:
@@ -143,12 +144,12 @@ class RufflePreparationTests(unittest.TestCase):
     def test_preparation_is_repeatable_and_replaces_stale_assets(self):
         data = self.bundle(self.files)
         cache = self.prepare(data)
-        (self.root / 'vendor/stale.wasm').write_bytes(b'old runtime')
+        (self.root / 'web/vendor/stale.wasm').write_bytes(b'old runtime')
         self.prepare(data)
         self.assertEqual(cache.read_bytes(), data)
-        self.assertEqual(set(p.name for p in (self.root / 'vendor').iterdir()), set(self.files))
+        self.assertEqual(set(p.name for p in (self.root / 'web/vendor').iterdir()), set(self.files))
         for name, expected in self.files.items():
-            self.assertEqual((self.root / 'vendor' / name).read_bytes(), expected)
+            self.assertEqual((self.root / 'web/vendor' / name).read_bytes(), expected)
 
     def test_corrupt_archive_rejected_before_touching_vendor(self):
         data = self.bundle(self.files)
@@ -158,7 +159,7 @@ class RufflePreparationTests(unittest.TestCase):
                 run, 'SHA256', hashlib.sha256(data).hexdigest()), redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(RuntimeError, 'Ruffle checksum mismatch'):
                 run.prepare_ruffle()
-        self.assertEqual((self.root / 'vendor/ruffle.js').read_bytes(), b'loader')
+        self.assertEqual((self.root / 'web/vendor/ruffle.js').read_bytes(), b'loader')
 
     def test_missing_variant_or_path_escape_rejected(self):
         for missing in ['a.wasm', 'LICENSE_MIT']:
@@ -176,7 +177,7 @@ class RufflePreparationTests(unittest.TestCase):
             files['openrotmg.json'] = json.dumps(metadata).encode()
             with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, 'provenance mismatch'):
                 self.prepare(self.bundle(files))
-        self.assertFalse((self.root / 'vendor').exists())
+        self.assertFalse((self.root / 'web/vendor').exists())
 
     def test_changed_source_patch_invalidates_bundle(self):
         name = run.LOCK['patches'][0]

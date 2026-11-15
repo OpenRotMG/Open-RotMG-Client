@@ -13,7 +13,7 @@ import prepare_editor as editor
 
 class NativeEditorPreparationTests(unittest.TestCase):
     def setUp(self):
-        self.source = (editor.ROOT / 'client.swf').read_bytes()
+        self.source = (editor.ROOT / editor.LOCK['source']).read_bytes()
 
     def test_exact_entry_only_artifact_and_unchanged_gameplay(self):
         result = editor.derive_editor(self.source)
@@ -27,7 +27,7 @@ class NativeEditorPreparationTests(unittest.TestCase):
             self.assertEqual(restored[offset:offset + len(after)], after)
             restored = restored[:offset] + before + restored[offset + len(after):]
         self.assertEqual(restored, self.source)
-        self.assertEqual((editor.ROOT / 'client.swf').read_bytes(), self.source)
+        self.assertEqual((editor.ROOT / editor.LOCK['source']).read_bytes(), self.source)
 
     def test_unknown_or_corrupt_source_rejected(self):
         for data in [b'', self.source[:-1], b'CWS' + self.source[3:]]:
@@ -47,7 +47,8 @@ class NativeEditorPreparationTests(unittest.TestCase):
 
     def test_repeatable_preparation_and_corrupt_artifact_preserved(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(editor, 'ROOT', Path(directory)):
-            source = editor.ROOT / 'client.swf'
+            source = editor.ROOT / editor.LOCK['source']
+            source.parent.mkdir()
             source.write_bytes(self.source)
             editor.prepare_editor()
             target = editor.ROOT / editor.LOCK['artifact']

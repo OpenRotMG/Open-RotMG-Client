@@ -54,9 +54,9 @@ def prepare_ruffle():
         with tempfile.TemporaryDirectory(prefix='.ruffle-stage-', dir=ROOT) as temporary:
             staged = Path(temporary) / 'vendor'
             archive.extractall(staged)
-            if (ROOT / 'vendor').exists():
-                shutil.rmtree(ROOT / 'vendor')
-            staged.rename(ROOT / 'vendor')
+            if (ROOT / 'web/vendor').exists():
+                shutil.rmtree(ROOT / 'web/vendor')
+            staged.rename(ROOT / 'web/vendor')
     if not cache.exists():
         cache.write_bytes(data)
     print(f'Prepared Ruffle {VERSION}: verified dual runtime and {len(patches)} source patches', flush=True)

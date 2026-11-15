@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const script = await readFile(new URL('../launcher.js', import.meta.url), 'utf8');
+const script = await readFile(new URL('../web/launcher.js', import.meta.url), 'utf8');
 const webglCanvas = {getContext: type => {
   assert.equal(type, 'webgl2');
   return {isContextLost: () => false};
@@ -15,10 +15,10 @@ const shadowRoot = {querySelectorAll: selector => {
 for (const base of ['/', '/_runtime/'+'a'.repeat(64)+'/']) {
 for (const [page, mode, movie] of [['index.html', 'game', 'client.swf'], ['draw.html', 'editor', 'native-texture-editor.swf']]) {
   test(`${page} explicitly loads ${movie} through the shared protected launcher`, async () => {
-    const html = await readFile(new URL(`../${page}`, import.meta.url), 'utf8');
+    const html = await readFile(new URL(`../web/${page}`, import.meta.url), 'utf8');
     assert.ok(html.includes(`data-mode="${mode}"`));
     assert.ok(html.includes('<script src="launcher.js"></script>'));
-    const gameplay = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+    const gameplay = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
     assert.equal(html.match(/content="default-src[^"]+"/)[0], gameplay.match(/content="default-src[^"]+"/)[0]);
     let options;
     const player = {shadowRoot, addEventListener() {}, ruffle: () => ({load: async value => {options = value;}})};
