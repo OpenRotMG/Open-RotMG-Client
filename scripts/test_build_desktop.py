@@ -19,9 +19,8 @@ class DesktopBuildTest(unittest.TestCase):
             root = Path(directory)
             client = root / 'client'
             (client / 'ruffle/patches').mkdir(parents=True)
-            (client / 'desktop/patches').mkdir(parents=True)
             (client / 'ruffle/patches/core.patch').write_bytes(b'core fix')
-            (client / 'desktop/patches/0001-inline-graphic-inspector.patch').write_bytes(b'inspector fix')
+            (client / 'ruffle/desktop-inspector.patch').write_bytes(b'inspector fix')
             source = io.BytesIO()
             with tarfile.open(fileobj=source, mode='w:gz') as archive:
                 for name in ['LICENSE.md', 'README.md']:
@@ -54,7 +53,7 @@ class DesktopBuildTest(unittest.TestCase):
                     provenance = json.load(archive.extractfile('openrotmg.json'))
                     self.assertEqual(provenance['client'], 'b' * 40)
                     self.assertEqual(provenance['patches'], {'core.patch': hashlib.sha256(b'core fix').hexdigest()})
-                    self.assertEqual(provenance['desktopPatches']['0001-inline-graphic-inspector.patch'], hashlib.sha256(b'inspector fix').hexdigest())
+                    self.assertEqual(provenance['desktopPatches']['desktop-inspector.patch'], hashlib.sha256(b'inspector fix').hexdigest())
                 self.assertEqual(len(commands.call_args_list), 5)
                 with patch.object(desktop.subprocess, 'check_output', return_value='rustc 1.98.0'):
                     with self.assertRaisesRegex(RuntimeError, 'requires Rust'):

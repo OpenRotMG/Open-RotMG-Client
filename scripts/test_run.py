@@ -46,7 +46,7 @@ class ClientRoutingTests(unittest.TestCase):
         self.assertNotIn("External requests are blocked", html)
 
     def test_focus_loss_releases_held_game_keys(self):
-        result = subprocess.run(["node", "--test", str(run.ROOT / "tests/input.mjs"), str(run.ROOT / "tests/launcher.mjs")],
+        result = subprocess.run(["node", "--test", str(run.ROOT / "scripts/input.mjs"), str(run.ROOT / "scripts/launcher.mjs")],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

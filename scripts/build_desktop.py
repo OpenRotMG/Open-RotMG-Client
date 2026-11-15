@@ -32,7 +32,7 @@ def build(work, output):
         patches[name] = hashlib.sha256(patch.read_bytes()).hexdigest()
         subprocess.run(['git', 'apply', '--check', str(patch)], cwd=source, check=True)
         subprocess.run(['git', 'apply', str(patch)], cwd=source, check=True)
-    desktop_patch = ROOT / 'desktop/patches/0001-inline-graphic-inspector.patch'
+    desktop_patch = ROOT / 'ruffle/desktop-inspector.patch'
     subprocess.run(['git', 'apply', '--check', str(desktop_patch)], cwd=source, check=True)
     subprocess.run(['git', 'apply', str(desktop_patch)], cwd=source, check=True)
     env = {**os.environ, 'CARGO_PROFILE_RELEASE_LTO': 'false', 'CARGO_PROFILE_RELEASE_CODEGEN_UNITS': '16',
