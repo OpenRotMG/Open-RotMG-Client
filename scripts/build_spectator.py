@@ -1043,7 +1043,7 @@ def spectator_interactions(root):
 
 
 def build(tools):
-    source = (ROOT / 'client.swf').read_bytes()
+    source = (ROOT / 'web/client.swf').read_bytes()
     if hashlib.sha256(source).hexdigest() != SOURCE_SHA256:
         raise RuntimeError('Spectator requires unchanged pinned 123.5.1 client.swf')
     with tempfile.TemporaryDirectory(prefix='openrotmg-spectator-') as directory:
@@ -1064,7 +1064,7 @@ def build(tools):
         result = b'CWS' + result[3:8] + zlib.compress(result[8:], 9)
         if len(result) != LOCK['outputBytes'] or hashlib.sha256(result).hexdigest() != LOCK['outputSha256']:
             raise RuntimeError(f'Spectator output checksum mismatch: SHA256 {hashlib.sha256(result).hexdigest()} ({len(result)} bytes); inspect source/toolchain/transform before updating lock')
-        (ROOT / 'spectator.swf').write_bytes(result)
+        (ROOT / 'web/spectator.swf').write_bytes(result)
         print(f'Spectator SHA256 {hashlib.sha256(result).hexdigest()} ({len(result)} bytes)')
 
 

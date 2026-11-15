@@ -125,7 +125,7 @@ class CursorTests(unittest.TestCase):
         tools = Path(os.environ['RABCDASM']).resolve()
         with tempfile.TemporaryDirectory() as directory:
             movie = Path(directory) / 'source.swf'
-            movie.write_bytes((spectator.ROOT / 'client.swf').read_bytes())
+            movie.write_bytes((spectator.ROOT / 'web/client.swf').read_bytes())
             subprocess.run([str(tools / 'abcexport'), str(movie)], check=True)
             subprocess.run([str(tools / 'rabcdasm'), str(movie.with_name('source-1.abc'))], check=True)
             original = spectator_cursor.add_method

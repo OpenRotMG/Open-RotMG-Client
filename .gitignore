@@ -1,8 +1,8 @@
 *.pem
 *.key
 .env
-/vendor/
+/web/vendor/
 /.ruffle-*.zip
 __pycache__/
-/native-texture-editor.swf
+/web/native-texture-editor.swf
 /.editor-stage-*

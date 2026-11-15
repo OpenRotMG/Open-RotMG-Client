@@ -175,8 +175,8 @@ def encoded_branches(code):
 
 class SpectatorBuildTests(unittest.TestCase):
     def test_pinned_movie_changes_only_game_abc_preserving_assets_and_reference(self):
-        source = (spectator.ROOT / 'client.swf').read_bytes()
-        output = (spectator.ROOT / 'spectator.swf').read_bytes()
+        source = (spectator.ROOT / 'web/client.swf').read_bytes()
+        output = (spectator.ROOT / 'web/spectator.swf').read_bytes()
         self.assertEqual(hashlib.sha256(source).hexdigest(), spectator.SOURCE_SHA256)
         self.assertEqual(hashlib.sha256(output).hexdigest(), spectator.LOCK['outputSha256'])
         self.assertEqual(len(output), spectator.LOCK['outputBytes'])
@@ -196,8 +196,9 @@ class SpectatorBuildTests(unittest.TestCase):
 
     def test_unknown_source_rejected_before_tools_or_artifact_write(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(spectator, 'ROOT', Path(directory)):
-            (spectator.ROOT / 'client.swf').write_bytes(b'unknown movie')
-            target = spectator.ROOT / 'spectator.swf'
+            (spectator.ROOT / 'web').mkdir()
+            (spectator.ROOT / 'web/client.swf').write_bytes(b'unknown movie')
+            target = spectator.ROOT / 'web/spectator.swf'
             target.write_bytes(b'existing evidence')
             with self.assertRaisesRegex(RuntimeError, 'unchanged pinned'):
                 spectator.build(Path('/missing-tools'))
@@ -208,17 +209,18 @@ class SpectatorBuildTests(unittest.TestCase):
         tools = Path(os.environ['RABCDASM']).resolve()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = (spectator.ROOT / 'client.swf').read_bytes()
-            (root / 'client.swf').write_bytes(source)
+            source = (spectator.ROOT / 'web/client.swf').read_bytes()
+            (root / 'web').mkdir()
+            (root / 'web/client.swf').write_bytes(source)
             with patch.object(spectator, 'ROOT', root):
                 spectator.build(tools)
-                first = (root / 'spectator.swf').read_bytes()
+                first = (root / 'web/spectator.swf').read_bytes()
                 spectator.build(tools)
-                self.assertEqual((root / 'spectator.swf').read_bytes(), first)
-                self.assertEqual((root / 'client.swf').read_bytes(), source)
-            subprocess.run([str(tools / 'abcexport'), str(root / 'spectator.swf')], check=True)
-            subprocess.run([str(tools / 'rabcdasm'), str(root / 'spectator-1.abc')], check=True)
-            bodies = interaction_bytecode((root / 'spectator-1.abc').read_bytes())
+                self.assertEqual((root / 'web/spectator.swf').read_bytes(), first)
+                self.assertEqual((root / 'web/client.swf').read_bytes(), source)
+            subprocess.run([str(tools / 'abcexport'), str(root / 'web/spectator.swf')], check=True)
+            subprocess.run([str(tools / 'rabcdasm'), str(root / 'web/spectator-1.abc')], check=True)
+            bodies = interaction_bytecode((root / 'web/spectator-1.abc').read_bytes())
             self.assertTrue({'spectatorCursorParse', 'spectatorCursor', 'spectatorCursorDraw',
                              'spectatorCursorAttach', 'spectatorCursorReset', 'spectatorChatParse',
                              'spectatorChat', 'spectatorChatDraw', 'spectatorChatReset',
@@ -226,7 +228,7 @@ class SpectatorBuildTests(unittest.TestCase):
             for name, code in bodies:
                 with self.subTest(encoded_method=name):
                     encoded_branches(code)
-            abc = root / 'spectator-1'
+            abc = root / 'web/spectator-1'
             web = (abc / 'WebMain.class.asasm').read_text()
             self.assertIn('"spectatorConnect"', web)
             self.assertIn('"spectatorBlockInput"', web)

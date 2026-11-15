@@ -41,8 +41,8 @@
       "reason": "kW constructor super(null) -> super(kW): normal native account refresh scene"
     }
   ],
-  "source": "client.swf",
+  "source": "web/client.swf",
   "sourceRevision": "5db91b03d2e1ca87e7d7fa0f184dce13487f44ee",
-  "artifact": "native-texture-editor.swf",
+  "artifact": "web/native-texture-editor.swf",
   "identity": "Reconstructed public entry over the preserved 123.5.1 client; not a recovered original TextureMaker artifact."
 }

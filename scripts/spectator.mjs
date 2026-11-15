@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 
-const script = await readFile(new URL('../spectator.js', import.meta.url), 'utf8');
+const script = await readFile(new URL('../web/spectator.js', import.meta.url), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const reply = (body, status = 200) => ({ok: status === 200, status, text: async () => JSON.stringify(body)});
 async function launch({path = '/api/bots/Triceps/view', ruffle = true, loadError, loadDelay = 0, duringLoadSwitch = false, resolve = () => reply({bot:'Biceps', player:22, source:11})} = {}) {
@@ -83,7 +83,7 @@ test('fixed same-origin assets/socket, selected native HUD flashvar, responsive 
   assert.equal(options.urlRewriteRules[1][1], 'https://game.example/sfx/music/');
   assert.equal(messages[0].type, 'openrotmg-bot-view');
   assert.equal(messages[0].bot, 'Triceps');
-  const html = await readFile(new URL('../spectator.html', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../web/spectator.html', import.meta.url), 'utf8');
   assert.ok(html.includes(`/api/bots/spectator.js?v=${createHash('sha256').update(script).digest('hex')}`), 'viewer must invalidate the cached script when it changes');
   assert.match(html, /aspect-ratio:4\/3/);
   assert.match(html, /100vh \* 4 \/ 3/);

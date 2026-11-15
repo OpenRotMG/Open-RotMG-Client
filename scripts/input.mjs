@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const script = await readFile(new URL('../launcher.js', import.meta.url), 'utf8');
+const script = await readFile(new URL('../web/launcher.js', import.meta.url), 'utf8');
 
 async function setup() {
   class Target {
