@@ -1,0 +1,13 @@
+diff --git a/core/src/display_object/edit_text.rs b/core/src/display_object/edit_text.rs
+index 2c26f3ab..cd782cde 100644
+--- a/core/src/display_object/edit_text.rs
++++ b/core/src/display_object/edit_text.rs
+@@ -3184,6 +3184,8 @@ impl<'gc> TInteractiveObject<'gc> for EditText<'gc> {
+         focused: bool,
+         _other: Option<InteractiveObject<'gc>>,
+     ) {
++        // Focus decides whether the caret and selection render, so cached ancestors must redraw.
++        self.invalidate_cached_bitmap();
+         if !focused {
+             // Commit IME on focus lost.
+             self.ensure_ime_committed(context);
